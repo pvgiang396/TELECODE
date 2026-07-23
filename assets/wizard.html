@@ -141,6 +141,10 @@ fetch('/api/status').then(r => r.json()).then(s => {
 }).catch(() => {
   loading.textContent = 'Không lấy được trạng thái máy — kiểm tra lại terminal.';
 });
+
+// Chặn chuột phải để giống 1 app desktop thật (mở kèm --app= ẩn sẵn thanh địa chỉ)
+// — chỉ ngăn cản hình thức, không phải cơ chế bảo mật.
+document.addEventListener('contextmenu', (e) => e.preventDefault());
 </script>
 </body>
 </html>

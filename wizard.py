@@ -161,11 +161,38 @@ def is_wsl() -> bool:
         return False
 
 
+def resolve_app_mode_browser_bin():
+    """Dò Chrome/Edge/Chromium để mở --app= (ẩn thanh địa chỉ) — giống
+    resolve_app_mode_browser_bin() trong setup.sh, tham khảo openAppModeBrowser()
+    của yan2ai/tray.js."""
+    if sys.platform == "darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+        for c in candidates:
+            if Path(c).exists():
+                return c
+        return None
+    names = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+             "microsoft-edge", "microsoft-edge-stable"]
+    for n in names:
+        p = shutil.which(n)
+        if p:
+            return p
+    return None
+
+
 def open_browser_plain(url: str):
     # Python trong WSL báo sys.platform == "linux" (không phải "win32") -> phải tự
     # phát hiện WSL riêng để gọi trình duyệt Windows qua cmd.exe, xdg-open không
     # có tác dụng gì trong WSL (không có X server).
-    if sys.platform == "darwin":
+    bin_ = resolve_app_mode_browser_bin()
+    if bin_ and not is_wsl():
+        # --app= ẩn thanh địa chỉ/tab, trông như 1 app desktop thay vì tab trình duyệt.
+        opener = [bin_, f"--app={url}"]
+    elif sys.platform == "darwin":
         opener = ["open", url]
     elif sys.platform == "win32":
         opener = ["cmd", "/c", "start", "", url]
