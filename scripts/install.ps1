@@ -30,6 +30,18 @@ if (-not (Test-WSLInstalled)) {
 Write-Host "== Cài đặt telecode bên trong WSL (Ubuntu) ==" -ForegroundColor Cyan
 wsl -d Ubuntu -- bash -lc "curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/main/scripts/install.sh | bash"
 
+# Shortcut Desktop mở VS Code (code-server) từ phía Windows — WSL2 tự forward
+# localhost sang Windows host (localhostForwarding, bật mặc định) nên
+# http://localhost:8443 mở thẳng từ trình duyệt Windows là vào được code-server
+# đang chạy trong WSL, không cần biết địa chỉ IP của WSL.
+$desktop = [Environment]::GetFolderPath("Desktop")
+$shortcutPath = Join-Path $desktop "VS Code (code-server).url"
+@"
+[InternetShortcut]
+URL=http://localhost:8443
+"@ | Set-Content -Path $shortcutPath -Encoding ASCII
+Write-Host "Đã tạo shortcut Desktop: $shortcutPath" -ForegroundColor Green
+
 Write-Host ""
 Write-Host "Xong. Bot Telegram và code-server đang chạy bên trong WSL." -ForegroundColor Green
 Write-Host "Lưu ý: mỗi lần khởi động lại Windows, WSL không tự chạy nền các tiến trình này —" -ForegroundColor Yellow

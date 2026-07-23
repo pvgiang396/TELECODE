@@ -310,6 +310,43 @@ if ! is_alive "$CS_PID"; then
 fi
 echo ""
 
+# --- 3b. Tạo shortcut Desktop mở VS Code (code-server) trên máy tính --------
+# Dùng luôn trên máy tính (không qua Telegram/tunnel) = mở localhost:8443 thẳng,
+# nhanh hơn nhiều vì không qua Cloudflare. Idempotent: ghi đè mỗi lần chạy để
+# luôn trỏ đúng cấu hình hiện tại (không cần xoá tay trước khi tạo lại).
+if [ -d "$HOME/Desktop" ]; then
+    CS_ICON=""
+    if root_dir="$(find_code_server_root)"; then
+        [ -f "$root_dir/src/browser/media/pwa-icon-512.png" ] && CS_ICON="$root_dir/src/browser/media/pwa-icon-512.png"
+    fi
+    if [ "$OS" = "mac" ]; then
+        SHORTCUT="$HOME/Desktop/VS Code (code-server).command"
+        cat > "$SHORTCUT" <<EOF
+#!/bin/bash
+open http://localhost:8443
+EOF
+        chmod +x "$SHORTCUT"
+    else
+        SHORTCUT="$HOME/Desktop/code-server.desktop"
+        cat > "$SHORTCUT" <<EOF
+[Desktop Entry]
+Type=Application
+Name=VS Code (code-server)
+Comment=Mở VS Code (code-server) tại localhost:8443
+Exec=xdg-open http://localhost:8443
+Icon=${CS_ICON:-code}
+Terminal=false
+Categories=Development;
+EOF
+        chmod +x "$SHORTCUT"
+        command -v gio >/dev/null 2>&1 && gio set "$SHORTCUT" metadata::trusted true 2>/dev/null || true
+    fi
+    ok "Đã tạo shortcut Desktop: $SHORTCUT"
+else
+    warn "Không thấy thư mục $HOME/Desktop — bỏ qua tạo shortcut (bạn vẫn mở tay http://localhost:8443)."
+fi
+echo ""
+
 # --- 4. cloudflared --------------------------------------------------------
 if command -v cloudflared &>/dev/null; then
     CURRENT_VER="$(cloudflared --version 2>/dev/null | head -n1)"

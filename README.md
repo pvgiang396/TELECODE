@@ -55,8 +55,12 @@ bash setup.sh
 
 - Mở bot (search username bot của bạn)
 - Gửi `/start`
-- Click nút "🔧 Open VS Code"
+- Bấm nút "🔧 VS Code" cạnh khung nhập tin nhắn (menu button)
 - VS Code (code-server) mở **trực tiếp** trong Mini App (không qua iframe trung gian) — đăng nhập bằng mật khẩu đã đặt ở bước cấu hình `config.yaml`.
+
+### Trên máy tính (dùng như VS Code desktop)
+
+`setup.sh` tự tạo 1 shortcut trên Desktop ("VS Code (code-server)") mở thẳng `http://localhost:8443` bằng trình duyệt mặc định — nhanh hơn nhiều so với qua Telegram/tunnel vì không qua Cloudflare. Đây là **cùng 1 phiên làm việc** với bản mở từ điện thoại (cùng file, cùng extension host) — mở song song ở cả 2 nơi vẫn an toàn.
 
 ## 🐳 Cách chạy với Docker (thay thế setup.sh)
 
