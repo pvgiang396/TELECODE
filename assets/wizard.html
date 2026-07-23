@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Cài đặt telecode</title>
+<link rel="icon" href="/icon.png" />
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -57,9 +58,11 @@
   }
   details.collapse[open] .chevron { transform: rotate(90deg); }
   details.collapse summary h2 { margin: 0; flex: 1; }
-  details.collapse .summary-current { font-size: 12px; color: #8a8a8a; }
   details.collapse[open] summary { border-bottom: 1px solid #3c3c3c; }
-  details.collapse .collapse-body { padding: 14px 16px 16px; }
+  details.collapse .collapse-body { padding: 4px 16px 4px; }
+  .sub-item { padding: 10px 0; border-top: 1px solid #3c3c3c; }
+  .sub-item:first-child { border-top: none; }
+  .sub-item h3 { font-size: 13px; margin: 0 0 8px; color: #cfcfcf; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -87,29 +90,44 @@ function radioGroup(name, label, current) {
   </div>`;
 }
 
-// Dùng cho mục ĐÃ CÀI/ĐANG CHẠY sẵn (mặc định chọn "Giữ nguyên") — thu gọn lại vì
-// không cần chú ý tới, bấm vào summary mới hiện radio bên trong.
-function collapsibleRadioGroup(name, label, current) {
-  return `<details class="step collapse">
-    <summary>
-      <span class="chevron">▸</span>
-      <h2>${label}</h2>
-      <span class="summary-current">${current}</span>
-    </summary>
-    <div class="collapse-body">
-      <div class="radio-row">
-        <label><input type="radio" name="${name}" value="keep" checked> Giữ nguyên</label>
-        <label><input type="radio" name="${name}" value="redo"> Cài lại / khởi động lại</label>
-      </div>
+// Nội dung 1 mục ĐÃ CÀI/ĐANG CHẠY sẵn (mặc định chọn "Giữ nguyên") — chỉ phần
+// bên trong, không tự bọc collapse riêng (4 mục này gộp chung 1 collapse duy nhất).
+function subRadioGroup(name, label, current) {
+  return `<div class="sub-item">
+    <h3>${label} — hiện tại: ${current}</h3>
+    <div class="radio-row">
+      <label><input type="radio" name="${name}" value="keep" checked> Giữ nguyên</label>
+      <label><input type="radio" name="${name}" value="redo"> Cài lại / khởi động lại</label>
     </div>
-  </details>`;
+  </div>`;
 }
 
 fetch('/api/status').then(r => r.json()).then(s => {
   let html = '';
 
+  // 4 mục đã cài/đang chạy sẵn -> gộp chung 1 collapse duy nhất (đóng mặc định).
+  // Mục nào CHƯA cài thì không xuất hiện ở đây (và cũng không có ở đâu khác).
+  let installedHtml = '';
   if (s.codeServerInstalled) {
-    html += collapsibleRadioGroup('codeServerAction', 'code-server', `đã cài (${s.codeServerVersion})`);
+    installedHtml += subRadioGroup('codeServerAction', 'code-server', `đã cài (${s.codeServerVersion})`);
+  }
+  if (s.codeServerRunning) {
+    installedHtml += subRadioGroup('codeServerRunAction', 'code-server: tiến trình', `đang chạy (PID ${s.codeServerPid})`);
+  }
+  if (s.cloudflaredInstalled) {
+    installedHtml += subRadioGroup('cloudflaredAction', 'cloudflared', `đã cài (${s.cloudflaredVersion})`);
+  }
+  if (s.tunnelRunning) {
+    installedHtml += subRadioGroup('tunnelAction', 'Tunnel code-server', `đang chạy (${s.tunnelUrl || 'PID ' + s.tunnelPid})`);
+  }
+  if (installedHtml) {
+    html += `<details class="step collapse">
+      <summary>
+        <span class="chevron">▸</span>
+        <h2>Đã cài đặt sẵn (bấm để xem/đổi)</h2>
+      </summary>
+      <div class="collapse-body">${installedHtml}</div>
+    </details>`;
   }
 
   html += `<div class="step">
@@ -120,18 +138,6 @@ fetch('/api/status').then(r => r.json()).then(s => {
     </div>
     <div class="hint">${s.currentPassword ? 'Để trống thì giữ mật khẩu cũ, đổi thì máy sẽ tự restart code-server.' : 'Chưa có mật khẩu, bắt buộc nhập mới.'}</div>
   </div>`;
-
-  if (s.codeServerRunning) {
-    html += collapsibleRadioGroup('codeServerRunAction', 'code-server: tiến trình', `đang chạy (PID ${s.codeServerPid})`);
-  }
-
-  if (s.cloudflaredInstalled) {
-    html += collapsibleRadioGroup('cloudflaredAction', 'cloudflared', `đã cài (${s.cloudflaredVersion})`);
-  }
-
-  if (s.tunnelRunning) {
-    html += collapsibleRadioGroup('tunnelAction', 'Tunnel code-server', `đang chạy (${s.tunnelUrl || 'PID ' + s.tunnelPid})`);
-  }
 
   html += `<div class="step">
     <h2>Token bot Telegram</h2>

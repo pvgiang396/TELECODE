@@ -110,6 +110,8 @@ def probe_status(run_dir: Path) -> dict:
 
 def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
     wizard_html = (dir_ / "assets" / "wizard.html").read_text(encoding="utf-8")
+    icon_path = dir_ / "assets" / "icon.png"
+    icon_bytes = icon_path.read_bytes() if icon_path.exists() else b""
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -133,6 +135,15 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
                 self.wfile.write(body)
             elif self.path == "/api/status":
                 self._send_json(200, probe_status(run_dir))
+            elif self.path == "/icon.png" and icon_bytes:
+                # Favicon riêng của wizard — không có link này thì Chrome dùng icon
+                # mặc định của nó cho cửa sổ --app=, kể cả taskbar/alt-tab (đã xác
+                # nhận qua _NET_WM_ICON bằng xprop).
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(icon_bytes)))
+                self.end_headers()
+                self.wfile.write(icon_bytes)
             else:
                 self._send_json(404, {"error": "not found"})
 
