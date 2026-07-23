@@ -4,7 +4,7 @@
 # kiến trúc, hoặc README.md để biết chi tiết từng bước setup.sh làm.
 #
 # Chạy:
-#   curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/master/scripts/install.sh | bash
+#   curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/main/scripts/install.sh | bash
 set -euo pipefail
 
 REPO_URL="https://gitlab.com/pvgiang396/telecode.git"

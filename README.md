@@ -23,7 +23,7 @@
 ### Cách nhanh nhất — 1 lệnh (khuyến nghị)
 
 ```bash
-curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/master/scripts/install.sh | bash
+curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/main/scripts/install.sh | bash
 ```
 
 Lệnh này tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu bạn đặt biến môi trường này), rồi chạy `setup.sh` — script tự kiểm tra/cài `code-server` + `cloudflared`, mở 2 tunnel (VS Code + mini_app.html), hỏi Telegram Bot Token, ghi `config.yaml`, rồi khởi động bot nền. Chạy lại đúng lệnh này bất cứ lúc nào để cập nhật code + khởi động lại — script hỏi giữ nguyên hay cài/chạy lại từng phần, không hỏi lại token nếu đã cấu hình.

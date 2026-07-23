@@ -52,7 +52,7 @@ Project này là một Telegram Mini App cho phép người dùng:
 
 Repo public tại `gitlab.com/pvgiang396/telecode` (SSH cho push, HTTPS cho clone/curl công khai — chỉ chủ tài khoản mới push được).
 
-- 1 lệnh: `curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/master/scripts/install.sh | bash` → `scripts/install.sh` clone/pull về `~/telecode` (hoặc `$TELECODE_DIR`) rồi `exec bash setup.sh`.
+- 1 lệnh: `curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/main/scripts/install.sh | bash` → `scripts/install.sh` clone/pull về `~/telecode` (hoặc `$TELECODE_DIR`) rồi `exec bash setup.sh`.
 - `setup.sh` (root project) là script idempotent chính: cài code-server + cloudflared, tạo password, chạy code-server nền, mở 2 tunnel (code-server + mini_app.html qua `python3 -m http.server`), tự sửa `VSCODE_PUBLIC_URL` trong `mini_app.html`, hỏi Telegram Bot Token, ghi `config.yaml`, cài Python deps (venv), chạy `bot.py` nền. Trạng thái tiến trình lưu PID ở `.run/` (gitignored) — chạy lại an toàn, không tạo tiến trình trùng lặp.
 - Khi chạy qua `curl | bash`, mọi prompt trong `setup.sh`/`scripts/install.sh` phải đọc từ `/dev/tty` (không dùng `read` mặc định) vì stdin đã bị nội dung script từ `curl` chiếm — xem comment trong `setup.sh`.
 
