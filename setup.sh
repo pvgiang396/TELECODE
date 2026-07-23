@@ -447,10 +447,20 @@ install_vsix_extension() { # install_vsix_extension <publisher> <name>
         warn "   Tải ${publisher}.${name} thất bại (kiểm tra mạng) — bỏ qua, chạy lại setup.sh sau để thử lại."
         return 1
     fi
-    if code-server --install-extension "$vsix" --force; then
+    local install_out
+    if install_out="$(code-server --install-extension "$vsix" --force 2>&1)"; then
         ok "   Đã cài ${publisher}.${name}"
+    elif echo "$install_out" | grep -qi "is a built-in extension.*cannot be downgraded"; then
+        # code-server bản mới (dựa VS Code >=1.99) bundle sẵn Copilot Chat làm
+        # built-in extension -> bản Marketplace tải về thường CŨ hơn, bị từ chối
+        # "downgrade". Đây KHÔNG phải lỗi: nghĩa là extension đã có sẵn, mới hơn
+        # bản ta định cài -> coi là thành công, chỉ cần đăng nhập (Command
+        # Palette > "GitHub Copilot: Sign In"), không cần cài gì thêm.
+        ok "   ${publisher}.${name} đã có sẵn built-in trong code-server (bản mới hơn bản Marketplace) — bỏ qua cài, chỉ cần đăng nhập."
     else
-        warn "   Cài ${publisher}.${name} thất bại (file .vsix lỗi hoặc code-server báo lỗi ở trên) — chạy lại setup.sh sau để thử lại."
+        warn "   Cài ${publisher}.${name} thất bại:"
+        echo "$install_out" | sed 's/^/     /'
+        warn "   → chạy lại setup.sh sau để thử lại."
     fi
     rm -f "$vsix"
 }
