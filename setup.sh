@@ -25,10 +25,31 @@ warn()  { echo -e "${YELLOW}⚠️  $1${NC}"; }
 err()   { echo -e "${RED}❌ $1${NC}"; }
 
 # --- Helpers hỏi giữ giá trị cũ / nhập mới ------------------------------
+#
+# Khi chạy ở chế độ "áp dụng nền" sau wizard web (TELECODE_APPLYING=1), câu trả
+# lời đã có sẵn trong $ANSWERS_FILE (JSON do wizard.py ghi) — ask_value/ask_choice
+# đọc thẳng từ đó thay vì hỏi qua terminal, không cần sửa lại phần thân script
+# ở dưới (các bước 1→9 gọi y hệt, chỉ thêm 1 tham số "key" để tra JSON).
+answers_get() { # answers_get <key> -> in ra giá trị hoặc rỗng nếu không có/không áp dụng
+    local key="$1"
+    [ "${TELECODE_APPLYING:-0}" = "1" ] && [ -f "$ANSWERS_FILE" ] || return 1
+    python3 -c "import json,sys
+try:
+    d = json.load(open('$ANSWERS_FILE'))
+    print(d.get('$key',''))
+except Exception:
+    pass" 2>/dev/null
+}
 
-# ask_value <nhãn> <giá_trị_hiện_tại|""> <secret:0|1>
+# ask_value <nhãn> <giá_trị_hiện_tại|""> <secret:0|1> [key_trong_wizard_json]
 ask_value() {
-    local label="$1" current="$2" secret="${3:-0}" display input
+    local label="$1" current="$2" secret="${3:-0}" key="${4:-}" display input
+    if [ -n "$key" ]; then
+        input="$(answers_get "$key")"
+        [ -z "$input" ] && input="$current"
+        echo "$input"
+        return
+    fi
     # Đọc từ /dev/tty (không phải stdin): khi chạy qua `curl | bash`, stdin bị
     # chiếm bởi nội dung script tải về nên `read` mặc định không hỏi được gì.
     if [ -n "$current" ]; then
@@ -54,7 +75,12 @@ ask_value() {
 # cuối cùng mới được echo ra stdout thật. Quên tách 2 kênh này là màn hình trắng,
 # script treo im lặng chờ phím mà người dùng không biết phải bấm gì.
 ask_choice() {
-    local desc="$1" choice
+    local desc="$1" json_key="${2:-}" choice
+    if [ -n "$json_key" ]; then
+        choice="$(answers_get "$json_key")"
+        [ "$choice" = "redo" ] && echo "redo" || echo "keep"
+        return
+    fi
     echo "$desc" > /dev/tty
 
     if [ ! -r /dev/tty ]; then
@@ -106,6 +132,42 @@ stop_pid() { # stop_pid <pidfile>
 OS="linux"
 [ "$(uname -s)" = "Darwin" ] && OS="mac"
 
+ANSWERS_FILE="$RUN_DIR/wizard-answers.json"
+
+# --- GUI wizard: thay hỏi từng bước qua terminal bằng 1 trang web ------------
+# Có GUI (desktop Linux/macOS, hoặc WSL — WSLg/Windows tự mở được trình duyệt) ->
+# mở wizard.py (xem file đó), đợi user điền form rồi submit, sau đó chuyển toàn bộ
+# phần cài đặt thật sang tiến trình nền (không giữ terminal), tự thoát ngay để trả
+# lại quyền điều khiển terminal cho user. Không có GUI (server/VPS headless thật
+# sự) -> giữ nguyên luồng hỏi qua terminal như cũ (ask_choice/ask_value ở dưới).
+HAS_GUI=0
+if [ "$OS" = "mac" ]; then
+    HAS_GUI=1
+elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    HAS_GUI=1
+elif grep -qi microsoft /proc/version 2>/dev/null; then
+    HAS_GUI=1  # WSL — mở trình duyệt Windows được qua cmd.exe
+fi
+
+if [ "$HAS_GUI" = "1" ] && [ "${TELECODE_APPLYING:-0}" != "1" ]; then
+    echo "======================================"
+    echo "🚀 Cài đặt telecode — mở giao diện web"
+    echo "======================================"
+    echo ""
+    rm -f "$ANSWERS_FILE"
+    info "Đang mở trình duyệt để cấu hình (http://127.0.0.1:8899)..."
+    python3 "$DIR/wizard.py" "$RUN_DIR" "$DIR"
+    if [ ! -f "$ANSWERS_FILE" ]; then
+        err "Chưa nhận được câu trả lời (có thể bạn đóng tab trước khi bấm 'Bắt đầu cài đặt') — chạy lại 'bash setup.sh' để thử lại."
+        exit 1
+    fi
+    ok "Đã nhận cấu hình — chuyển cài đặt sang chạy nền, bạn có thể đóng terminal này."
+    TELECODE_APPLYING=1 nohup bash "$0" > "$LOG_DIR/setup-apply.log" 2>&1 &
+    disown
+    echo "📄 Theo dõi tiến trình (không bắt buộc): tail -f $LOG_DIR/setup-apply.log"
+    exit 0
+fi
+
 echo "======================================"
 echo "🚀 Telegram VS Code Mini App - Setup"
 echo "======================================"
@@ -114,7 +176,7 @@ echo ""
 # --- 1. code-server ------------------------------------------------------
 if command -v code-server &>/dev/null; then
     CURRENT_VER="$(code-server --version 2>/dev/null | head -n1)"
-    if [ "$(ask_choice "1) code-server: đã cài (${CURRENT_VER})")" = "redo" ]; then
+    if [ "$(ask_choice "1) code-server: đã cài (${CURRENT_VER})" "codeServerAction")" = "redo" ]; then
         curl -fsSL https://code-server.dev/install.sh | sh
     fi
 else
@@ -154,7 +216,7 @@ patch_code_server_login() {
     # chung 1 marker ở bash) — máy đã patch HTML từ bản cũ (thiếu fix specificity
     # CSS) vẫn phải được vá lại phần CSS khi chạy setup.sh bản mới, dù HTML không
     # cần đổi gì thêm.
-    grep -q "telecode-eye-toggle" "$html" 2>/dev/null && grep -q "telecode-eye-toggle-css-v2" "$css" 2>/dev/null && return
+    grep -q "telecode-eye-toggle" "$html" 2>/dev/null && grep -q "telecode-anti-inspect" "$html" 2>/dev/null && grep -q "telecode-eye-toggle-css-v2" "$css" 2>/dev/null && return
 
     info "1b) Thêm/cập nhật icon hiện/ẩn mật khẩu vào trang đăng nhập code-server..."
     local SUDO=""
@@ -198,13 +260,32 @@ new = '''            <!-- telecode-eye-toggle -->
             </div>'''
 
 if old in html:
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(html.replace(old, new))
-    print("html: da vao lan dau")
+    html = html.replace(old, new)
+    print("html: da vao icon con mat lan dau")
 elif "telecode-eye-toggle" in html:
-    print("html: da vao tu truoc, bo qua")
+    print("html: icon con mat da vao tu truoc, bo qua")
 else:
-    print("WARN: khong tim thay khoi HTML mat khau de patch (co the code-server da doi cau truc)")
+    print("WARN: khong tim thay khoi HTML mat khau de patch icon con mat (co the code-server da doi cau truc)")
+
+# Chan F12/chuot phai CHI o trang login (khong dung workbench.html) - F12 trong VS
+# Code la phim tat that "Go to Definition", chan toan trang se pha tinh nang do khi
+# dang code. Day chi la ngan can hinh thuc (JS khong chan duoc DevTools trinh duyet
+# that) - tham khao cach lam trong yan2ai/public/chat.html.
+if "telecode-anti-inspect" not in html:
+    anti_inspect = '''    <script>
+      // telecode-anti-inspect
+      document.addEventListener('keydown', function (e) { if (e.key === 'F12') e.preventDefault(); });
+      document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    </script>
+  </body>'''
+    if "  </body>" in html:
+        html = html.replace("  </body>", anti_inspect, 1)
+        print("html: da them chan F12/chuot phai")
+    else:
+        print("WARN: khong tim thay </body> de them chan F12/chuot phai")
+
+with open(html_path, "w", encoding="utf-8") as f:
+    f.write(html)
 
 with open(css_path, "r", encoding="utf-8") as f:
     css = f.read()
@@ -271,7 +352,7 @@ CS_CONFIG="$HOME/.config/code-server/config.yaml"
 mkdir -p "$(dirname "$CS_CONFIG")"
 CURRENT_PW=""
 [ -f "$CS_CONFIG" ] && CURRENT_PW="$(grep '^password:' "$CS_CONFIG" | sed 's/^password: *//')"
-CS_PASSWORD="$(ask_value "2) Mật khẩu code-server" "$CURRENT_PW" 1)"
+CS_PASSWORD="$(ask_value "2) Mật khẩu code-server" "$CURRENT_PW" 1 "password")"
 cat > "$CS_CONFIG" <<EOF
 bind-addr: 127.0.0.1:8443
 auth: password
@@ -298,7 +379,7 @@ if [ "$CS_PASSWORD" != "$CURRENT_PW" ] && is_alive "$CS_PID"; then
     warn "Mật khẩu vừa đổi — bắt buộc khởi động lại code-server để áp dụng."
     stop_pid "$CS_PID"
 elif is_alive "$CS_PID"; then
-    if [ "$(ask_choice "3) code-server: đang chạy (PID $(cat "$CS_PID"))")" = "redo" ]; then
+    if [ "$(ask_choice "3) code-server: đang chạy (PID $(cat "$CS_PID"))" "codeServerRunAction")" = "redo" ]; then
         stop_pid "$CS_PID"
     fi
 fi
@@ -314,27 +395,62 @@ echo ""
 # Dùng luôn trên máy tính (không qua Telegram/tunnel) = mở localhost:8443 thẳng,
 # nhanh hơn nhiều vì không qua Cloudflare. Idempotent: ghi đè mỗi lần chạy để
 # luôn trỏ đúng cấu hình hiện tại (không cần xoá tay trước khi tạo lại).
-if [ -d "$HOME/Desktop" ]; then
-    CS_ICON=""
-    if root_dir="$(find_code_server_root)"; then
-        [ -f "$root_dir/src/browser/media/pwa-icon-512.png" ] && CS_ICON="$root_dir/src/browser/media/pwa-icon-512.png"
+#
+# Mở bằng trình duyệt Chrome/Edge/Chromium ở chế độ --app= (ẩn thanh địa chỉ,
+# giống app desktop thật) — tham khảo openAppModeBrowser() trong yan2ai/tray.js.
+# Không tìm thấy trình duyệt nào trong nhóm Chromium -> fallback mở tab thường.
+resolve_app_mode_browser_bin() {
+    local candidates=()
+    if [ "$OS" = "mac" ]; then
+        candidates=(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+            "/Applications/Chromium.app/Contents/MacOS/Chromium"
+        )
+    else
+        candidates=(google-chrome google-chrome-stable chromium chromium-browser microsoft-edge microsoft-edge-stable)
     fi
+    for c in "${candidates[@]}"; do
+        if [ "${c:0:1}" = "/" ]; then
+            [ -x "$c" ] && { echo "$c"; return 0; }
+        else
+            command -v "$c" &>/dev/null && { command -v "$c"; return 0; }
+        fi
+    done
+    return 1
+}
+
+if [ -d "$HOME/Desktop" ]; then
+    ICON_FILE="$DIR/assets/icon.png"
+    APP_BROWSER="$(resolve_app_mode_browser_bin || true)"
     if [ "$OS" = "mac" ]; then
         SHORTCUT="$HOME/Desktop/VS Code (code-server).command"
-        cat > "$SHORTCUT" <<EOF
+        if [ -n "$APP_BROWSER" ]; then
+            cat > "$SHORTCUT" <<EOF
+#!/bin/bash
+"$APP_BROWSER" --app=http://localhost:8443
+EOF
+        else
+            cat > "$SHORTCUT" <<EOF
 #!/bin/bash
 open http://localhost:8443
 EOF
+        fi
         chmod +x "$SHORTCUT"
     else
         SHORTCUT="$HOME/Desktop/code-server.desktop"
+        if [ -n "$APP_BROWSER" ]; then
+            EXEC_LINE="$APP_BROWSER --app=http://localhost:8443"
+        else
+            EXEC_LINE="xdg-open http://localhost:8443"
+        fi
         cat > "$SHORTCUT" <<EOF
 [Desktop Entry]
 Type=Application
 Name=VS Code (code-server)
 Comment=Mở VS Code (code-server) tại localhost:8443
-Exec=xdg-open http://localhost:8443
-Icon=${CS_ICON:-code}
+Exec=$EXEC_LINE
+Icon=${ICON_FILE:-code}
 Terminal=false
 Categories=Development;
 EOF
@@ -350,7 +466,7 @@ echo ""
 # --- 4. cloudflared --------------------------------------------------------
 if command -v cloudflared &>/dev/null; then
     CURRENT_VER="$(cloudflared --version 2>/dev/null | head -n1)"
-    if [ "$(ask_choice "4) cloudflared: đã cài (${CURRENT_VER})")" = "redo" ]; then
+    if [ "$(ask_choice "4) cloudflared: đã cài (${CURRENT_VER})" "cloudflaredAction")" = "redo" ]; then
         if [ "$OS" = "mac" ]; then brew install cloudflared
         else
             TMP_DEB="$(mktemp --suffix=.deb)"
@@ -384,7 +500,7 @@ wait_for_url() { # wait_for_url <logfile> -> in ra URL khi tìm thấy, timeout 
 T1_PID="$RUN_DIR/tunnel-code.pid"
 T1_LOG="$LOG_DIR/tunnel-code.log"
 if is_alive "$T1_PID" && [ -n "$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$T1_LOG" 2>/dev/null | head -n1)" ]; then
-    if [ "$(ask_choice "5) Tunnel code-server: đang chạy ($(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$T1_LOG" | head -n1))")" = "redo" ]; then
+    if [ "$(ask_choice "5) Tunnel code-server: đang chạy ($(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$T1_LOG" | head -n1))" "tunnelAction")" = "redo" ]; then
         stop_pid "$T1_PID"; > "$T1_LOG"
     fi
 fi
@@ -408,7 +524,7 @@ CONFIG_FILE="$DIR/config.yaml"
 CURRENT_TOKEN="$(grep '^TELEGRAM_BOT_TOKEN:' "$CONFIG_FILE" | sed -E 's/^TELEGRAM_BOT_TOKEN: *"?([^"]*)"?/\1/')"
 [ "$CURRENT_TOKEN" = "YOUR_BOT_TOKEN_HERE" ] && CURRENT_TOKEN=""
 echo "6) Token bot Telegram — lấy từ @BotFather (gửi /newbot trên điện thoại nếu chưa có)."
-BOT_TOKEN="$(ask_value "   Token" "$CURRENT_TOKEN" 1)"
+BOT_TOKEN="$(ask_value "   Token" "$CURRENT_TOKEN" 1 "token")"
 echo ""
 
 # --- 7. Ghi config.yaml -------------------------------------------------------
@@ -454,7 +570,7 @@ echo ""
 # --- 9. Chạy bot ----------------------------------------------------------------
 BOT_PID="$RUN_DIR/bot.pid"
 if is_alive "$BOT_PID"; then
-    if [ "$(ask_choice "9) Bot: đang chạy (PID $(cat "$BOT_PID"))")" = "redo" ]; then
+    if [ "$(ask_choice "9) Bot: đang chạy (PID $(cat "$BOT_PID"))" "botAction")" = "redo" ]; then
         stop_pid "$BOT_PID"
     fi
 fi
@@ -473,7 +589,7 @@ echo "======================================"
 ok "Setup xong!"
 echo "======================================"
 echo ""
-echo "📱 Trên điện thoại: mở Telegram → tìm bot của bạn → /start → bấm '🔧 Open VS Code'"
+echo "📱 Trên điện thoại: mở Telegram → tìm bot của bạn → bấm nút '🔧 VS Code' cạnh khung nhập tin nhắn"
 echo "🔗 VS Code URL: $VSCODE_PUBLIC_URL"
 echo "📄 Log: $LOG_DIR/"
 echo ""

@@ -35,7 +35,11 @@ powershell -ExecutionPolicy Bypass -Command "irm https://gitlab.com/pvgiang396/t
 ```
 code-server chỉ hỗ trợ chính thức Linux/macOS — trên Windows lệnh trên tự cài WSL2 (Ubuntu) nếu chưa có, rồi chạy `install.sh` bên trong đó. Nếu WSL vừa được cài lần đầu, làm theo hướng dẫn khởi động lại máy rồi chạy lại đúng lệnh.
 
-Lệnh trên tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu bạn đặt biến môi trường này), rồi chạy `setup.sh` — script tự kiểm tra/cài `code-server` + `cloudflared`, mở tunnel cho VS Code, hỏi Telegram Bot Token, ghi `config.yaml`, rồi khởi động bot nền. Chạy lại đúng lệnh này bất cứ lúc nào để cập nhật code + khởi động lại — script hỏi giữ nguyên hay cài/chạy lại từng phần (chọn bằng phím ↑/↓ + Enter), không hỏi lại token nếu đã cấu hình.
+Lệnh trên tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu bạn đặt biến môi trường này), rồi chạy `setup.sh`.
+
+**Trên máy có giao diện (desktop Linux/macOS, hoặc Windows qua WSL)**: `setup.sh` tự mở 1 trang web (`http://127.0.0.1:8899`) cho bạn điền cấu hình bằng radio/input thay vì hỏi qua terminal — điền xong bấm "Bắt đầu cài đặt", việc cài đặt thật (code-server, cloudflared, tunnel, bot) chuyển sang chạy nền, terminal trả quyền điều khiển lại ngay, có thể đóng terminal an toàn. Chạy lại đúng lệnh Quick Start bất cứ lúc nào để cập nhật/khởi động lại — form tự hiện đúng bước cần hỏi dựa theo trạng thái máy hiện tại (đã cài gì, đang chạy gì), không hỏi lại token/mật khẩu nếu đã cấu hình (chỉ hiện sẵn giá trị cũ).
+
+**Trên máy không có giao diện (server/VPS headless thật sự)**: tự động fallback về hỏi qua terminal như trước (radio ↑/↓ + Enter, nhập text) — không cần trình duyệt.
 
 Cần chuẩn bị trước: token bot Telegram từ [@BotFather](https://t.me/BotFather) (gửi `/newbot` trên điện thoại).
 
@@ -49,7 +53,7 @@ cd telecode
 bash setup.sh
 ```
 
-`setup.sh` làm toàn bộ các việc: cài code-server + cloudflared, thêm icon hiện/ẩn mật khẩu vào trang login code-server, tạo password, chạy code-server nền, mở tunnel, tạo `config.yaml` từ `config.example.yaml`, cài dependency Python (venv riêng), và chạy `bot.py` nền. Chạy lại `bash setup.sh` bất cứ lúc nào — idempotent, không tạo tiến trình trùng lặp.
+`setup.sh` làm toàn bộ các việc: mở wizard web thu thập cấu hình (hoặc hỏi qua terminal nếu headless), cài code-server + cloudflared, thêm icon hiện/ẩn mật khẩu + chặn F12/chuột phải vào trang login code-server, tạo password, chạy code-server nền, tạo shortcut Desktop, mở tunnel, tạo `config.yaml` từ `config.example.yaml`, cài dependency Python (venv riêng), và chạy `bot.py` nền. Chạy lại `bash setup.sh` bất cứ lúc nào — idempotent, không tạo tiến trình trùng lặp.
 
 ### Trên Telegram
 
@@ -60,7 +64,9 @@ bash setup.sh
 
 ### Trên máy tính (dùng như VS Code desktop)
 
-`setup.sh` tự tạo 1 shortcut trên Desktop ("VS Code (code-server)") mở thẳng `http://localhost:8443` bằng trình duyệt mặc định — nhanh hơn nhiều so với qua Telegram/tunnel vì không qua Cloudflare. Đây là **cùng 1 phiên làm việc** với bản mở từ điện thoại (cùng file, cùng extension host) — mở song song ở cả 2 nơi vẫn an toàn.
+`setup.sh` tự tạo 1 shortcut trên Desktop ("VS Code (code-server)", dùng icon riêng `assets/icon.png`) mở thẳng `http://localhost:8443` — nhanh hơn nhiều so với qua Telegram/tunnel vì không qua Cloudflare. Đây là **cùng 1 phiên làm việc** với bản mở từ điện thoại (cùng file, cùng extension host) — mở song song ở cả 2 nơi vẫn an toàn.
+
+Nếu máy có Chrome/Edge/Chromium, shortcut mở bằng chế độ `--app=` — ẩn thanh địa chỉ/tab, trông như 1 app desktop thật thay vì tab trình duyệt. Không có trình duyệt nào trong nhóm đó thì tự fallback về mở tab thường.
 
 ## 🐳 Cách chạy với Docker (thay thế setup.sh)
 
@@ -85,6 +91,10 @@ CODE_SERVER_WORKSPACE=~/my-project bash setup.sh
 ```
 
 Nếu thư mục không tồn tại, script tự cảnh báo và fallback về `$HOME`.
+
+### Chặn F12/chuột phải ở trang login — chỉ mang tính hình thức
+
+`setup.sh` tự thêm JS chặn F12 và menu chuột phải vào trang **login** code-server (không đụng workbench sau khi đăng nhập — F12 trong VS Code là phím tắt "Go to Definition", chặn toàn trang sẽ phá tính năng đó khi đang code). Lưu ý: JS không thể chặn DevTools trình duyệt thật — đây chỉ là ngăn cản sơ đẳng, không phải cơ chế bảo mật.
 
 ### Bật Password cho Code-Server
 
@@ -116,6 +126,10 @@ sudo ufw enable
 telecode/
 ├── bot.py                 # Telegram bot chính — nút mở thẳng VSCODE_PUBLIC_URL
 ├── mini_app.html          # KHÔNG dùng trong luồng mặc định nữa (xem "Vì sao không dùng iframe" bên dưới) — giữ lại để tham khảo
+├── wizard.py              # Server nhỏ (stdlib) phục vụ giao diện cài đặt web thay cho hỏi qua terminal
+├── assets/wizard.html     # Trang wizard cài đặt (1 file tĩnh, inline CSS/JS)
+├── assets/icon.png        # Icon Desktop shortcut
+├── assets/icon.ico        # Icon Desktop shortcut (Windows .lnk)
 ├── requirements.txt       # Python dependencies
 ├── config.example.yaml    # File cấu hình mẫu
 ├── docker-compose.yml     # Docker setup

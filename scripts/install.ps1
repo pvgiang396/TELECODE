@@ -34,12 +34,35 @@ wsl -d Ubuntu -- bash -lc "curl -fsSL https://gitlab.com/pvgiang396/telecode/-/r
 # localhost sang Windows host (localhostForwarding, bật mặc định) nên
 # http://localhost:8443 mở thẳng từ trình duyệt Windows là vào được code-server
 # đang chạy trong WSL, không cần biết địa chỉ IP của WSL.
+#
+# Dùng .lnk (không phải .url) để: (1) gắn được icon riêng (icon.ico bundle sẵn
+# trong repo, đọc qua đường dẫn UNC \\wsl$\...), (2) mở Edge ở chế độ --app= (ẩn
+# thanh địa chỉ, giống app desktop thật) thay vì mở tab trình duyệt thường.
 $desktop = [Environment]::GetFolderPath("Desktop")
-$shortcutPath = Join-Path $desktop "VS Code (code-server).url"
-@"
-[InternetShortcut]
-URL=http://localhost:8443
-"@ | Set-Content -Path $shortcutPath -Encoding ASCII
+$shortcutPath = Join-Path $desktop "VS Code (code-server).lnk"
+
+$wslUser = (wsl -d Ubuntu -- whoami 2>$null).Trim()
+$iconPath = if ($wslUser) { "\\wsl$\Ubuntu\home\$wslUser\telecode\assets\icon.ico" } else { $null }
+
+$edgeCandidates = @(
+    "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+)
+$edgeBin = $edgeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut($shortcutPath)
+if ($edgeBin) {
+    $Shortcut.TargetPath = $edgeBin
+    $Shortcut.Arguments = "--app=http://localhost:8443"
+} else {
+    # Không tìm thấy Edge -> fallback mở bằng trình duyệt mặc định (tab thường, có address bar)
+    $Shortcut.TargetPath = "http://localhost:8443"
+}
+if ($iconPath -and (Test-Path $iconPath -ErrorAction SilentlyContinue)) {
+    $Shortcut.IconLocation = $iconPath
+}
+$Shortcut.Save()
 Write-Host "Đã tạo shortcut Desktop: $shortcutPath" -ForegroundColor Green
 
 Write-Host ""
