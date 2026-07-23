@@ -370,12 +370,19 @@ patch_code_server_favicon() {
     fi
 
     info "1c) Đổi icon favicon/PWA của code-server sang icon riêng..."
-    $SUDO cp "$DIR/assets/icon.ico" "$media/favicon.ico"
-    $SUDO cp "$DIR/assets/favicon.svg" "$media/favicon-dark-support.svg"
-    $SUDO cp "$DIR/assets/pwa-icon-192.png" "$media/pwa-icon-192.png"
-    $SUDO cp "$DIR/assets/pwa-icon-512.png" "$media/pwa-icon-512.png"
-    [ -f "$media/pwa-icon-maskable-192.png" ] && $SUDO cp "$DIR/assets/pwa-icon-192.png" "$media/pwa-icon-maskable-192.png"
-    [ -f "$media/pwa-icon-maskable-512.png" ] && $SUDO cp "$DIR/assets/pwa-icon-512.png" "$media/pwa-icon-maskable-512.png"
+    # Gộp hết các lệnh cp cần quyền root vào 1 lệnh sudo DUY NHẤT — chạy nền (không
+    # TTY thật) khiến sudo không cache được thông tin xác thực giữa các lần gọi
+    # riêng lẻ, mỗi `$SUDO cp` tách rời sẽ hỏi lại mật khẩu (đã gặp thật, user phải
+    # gõ sudo password 6 lần liên tiếp).
+    $SUDO bash -c "
+        cp '$DIR/assets/icon.ico' '$media/favicon.ico'
+        cp '$DIR/assets/favicon.svg' '$media/favicon-dark-support.svg'
+        cp '$DIR/assets/pwa-icon-192.png' '$media/pwa-icon-192.png'
+        cp '$DIR/assets/pwa-icon-512.png' '$media/pwa-icon-512.png'
+        [ -f '$media/pwa-icon-maskable-192.png' ] && cp '$DIR/assets/pwa-icon-192.png' '$media/pwa-icon-maskable-192.png'
+        [ -f '$media/pwa-icon-maskable-512.png' ] && cp '$DIR/assets/pwa-icon-512.png' '$media/pwa-icon-maskable-512.png'
+        true
+    "
     ok "Đã đổi icon favicon/PWA — nếu Chrome vẫn hiện icon cũ trên taskbar, đó là do cache icon của Chrome cho origin này, thử mở lại cửa sổ app-mode hoặc xoá site data."
 }
 patch_code_server_favicon
