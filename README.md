@@ -20,91 +20,36 @@
 
 ## 🎯 Quick Start
 
-### 1. Chuẩn bị
+### Cách nhanh nhất — 1 lệnh (khuyến nghị)
 
 ```bash
-# Clone hoặc download project
-cd telegram-vscode-mini-app
-
-# Cài dependencies
-pip install -r requirements.txt
+curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/master/scripts/install.sh | bash
 ```
 
-### 2. Cấu hình
+Lệnh này tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu bạn đặt biến môi trường này), rồi chạy `setup.sh` — script tự kiểm tra/cài `code-server` + `cloudflared`, mở 2 tunnel (VS Code + mini_app.html), hỏi Telegram Bot Token, ghi `config.yaml`, rồi khởi động bot nền. Chạy lại đúng lệnh này bất cứ lúc nào để cập nhật code + khởi động lại — script hỏi giữ nguyên hay cài/chạy lại từng phần, không hỏi lại token nếu đã cấu hình.
+
+Cần chuẩn bị trước: token bot Telegram từ [@BotFather](https://t.me/BotFather) (gửi `/newbot` trên điện thoại).
+
+Đây là repo **public** (ai cũng curl/clone được) nhưng chỉ chủ tài khoản GitLab mới push được — dùng để cài, không dùng để đóng góp code.
+
+### Cách thủ công (nếu muốn kiểm soát từng bước)
 
 ```bash
-# Copy file cấu hình
-cp config.example.yaml config.yaml
-
-# Chỉnh sửa config.yaml
-# - Thêm BOT_TOKEN từ @BotFather
-# - Cấu hình port và password
-nano config.yaml
+git clone https://gitlab.com/pvgiang396/telecode.git
+cd telecode
+bash setup.sh
 ```
 
-### 3. Setup VS Code Server
+`setup.sh` làm toàn bộ các việc: cài code-server + cloudflared, tạo password, chạy code-server nền, mở tunnel, tự sửa `mini_app.html`, tạo `config.yaml` từ `config.example.yaml`, cài dependency Python (venv riêng), và chạy `bot.py` nền. Chạy lại `bash setup.sh` bất cứ lúc nào — idempotent, không tạo tiến trình trùng lặp.
 
-**Option A: Code-server (Khuyến nghị)**
-
-```bash
-# Linux
-sudo apt install -y code-server
-
-# macOS
-brew install code-server
-
-# Windows
-choco install code-server
-```
-
-**Option B: VS Code Server chính thức**
-
-```bash
-code --install-extension GitHub.copilot
-```
-
-### 4. Tạo Internet Tunnel
-
-**Cloudflare Tunnel (Miễn phí & An toàn)**
-
-```bash
-# Cài cloudflared
-# Linux:
-wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.tgz
-tar -xzf cloudflared-linux-amd64.tgz
-
-# macOS:
-brew install cloudflare/cloudflare/cloudflared
-
-# Chạy tunnel
-./cloudflared tunnel --url http://localhost:8443
-
-# Ghi nhớ URL: https://your-tunnel.trycloudflare.com
-```
-
-Cập nhật URL này vào `config.yaml` trong field `VSCODE_PUBLIC_URL`
-
-### 5. Chạy Bot
-
-```bash
-python bot.py
-```
-
-Bạn sẽ thấy:
-```
-✅ Bot started successfully!
-🔗 VS Code URL: https://your-tunnel.trycloudflare.com
-📱 Send /start to your bot on Telegram
-```
-
-### 6. Trên Telegram
+### Trên Telegram
 
 - Mở bot (search username bot của bạn)
 - Gửi `/start`
 - Click nút "🔧 Open VS Code"
 - VS Code sẽ mở trong Telegram Mini App!
 
-## 🐳 Cách chạy với Docker (Dễ hơn)
+## 🐳 Cách chạy với Docker (thay thế setup.sh)
 
 ```bash
 docker-compose up -d

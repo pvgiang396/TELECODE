@@ -29,14 +29,16 @@ err()   { echo -e "${RED}❌ $1${NC}"; }
 # ask_value <nhãn> <giá_trị_hiện_tại|""> <secret:0|1>
 ask_value() {
     local label="$1" current="$2" secret="${3:-0}" display input
+    # Đọc từ /dev/tty (không phải stdin): khi chạy qua `curl | bash`, stdin bị
+    # chiếm bởi nội dung script tải về nên `read` mặc định không hỏi được gì.
     if [ -n "$current" ]; then
         if [ "$secret" = "1" ]; then display="********"; else display="$current"; fi
-        read -rp "$label [hiện tại: $display] — Enter để giữ, hoặc nhập giá trị mới: " input
+        read -rp "$label [hiện tại: $display] — Enter để giữ, hoặc nhập giá trị mới: " input < /dev/tty
         [ -z "$input" ] && { echo "$current"; return; }
         echo "$input"
     else
-        read -rp "$label (chưa có giá trị, bắt buộc nhập): " input
-        while [ -z "$input" ]; do read -rp "  → không được để trống, nhập lại: " input; done
+        read -rp "$label (chưa có giá trị, bắt buộc nhập): " input < /dev/tty
+        while [ -z "$input" ]; do read -rp "  → không được để trống, nhập lại: " input < /dev/tty; done
         echo "$input"
     fi
 }
@@ -45,7 +47,7 @@ ask_value() {
 ask_choice() {
     local desc="$1" choice
     echo "$desc"
-    read -rp "  1) Giữ nguyên   2) Cài lại/khởi động lại  [mặc định 1]: " choice
+    read -rp "  1) Giữ nguyên   2) Cài lại/khởi động lại  [mặc định 1]: " choice < /dev/tty
     choice=${choice:-1}
     [ "$choice" = "2" ] && echo "redo" || echo "keep"
 }
