@@ -28,8 +28,7 @@ Project này là một Telegram Mini App cho phép người dùng:
                          ↓
 ┌─────────────────────────────────────────────────────────────┐
 │              Internet Tunnel Layer                          │
-│         ● Cloudflare Tunnel (Recommended)                  │
-│         ● Ngrok (Alternative)                              │
+│         ● Tailscale Funnel (URL cố định, dùng hiện tại)     │
 └────────────────────────┬────────────────────────────────────┘
                          │ (Local network)
                          ↓
@@ -54,7 +53,10 @@ Repo public tại `gitlab.com/pvgiang396/telecode` (SSH cho push, HTTPS cho clon
 
 - Linux/macOS: `curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/main/scripts/install.sh | bash` → `scripts/install.sh` clone/pull về `~/telecode` (hoặc `$TELECODE_DIR`) rồi `exec bash setup.sh`.
 - Windows: `scripts/install.ps1` (code-server không hỗ trợ Windows native) — tự cài WSL2/Ubuntu nếu chưa có rồi gọi lại `install.sh` bên trong WSL, không viết lại logic setup riêng cho Windows.
-- `setup.sh` (root project) là script idempotent chính: cài code-server + cloudflared, patch trang login code-server thêm icon hiện/ẩn mật khẩu (xem dưới), tạo password, chạy code-server nền (mở đúng `$CODE_SERVER_WORKSPACE`, mặc định `~/Code` — KHÔNG mở cả `$HOME`, tránh lộ toàn bộ home directory qua Mini App), mở tunnel cho code-server, hỏi Telegram Bot Token, ghi `config.yaml`, cài Python deps (venv), chạy `bot.py` nền. Trạng thái tiến trình lưu PID ở `.run/` (gitignored) — chạy lại an toàn, không tạo tiến trình trùng lặp. Đổi mật khẩu code-server (bước 2) tự ép restart code-server (bước 3) — code-server chỉ đọc `config.yaml` lúc khởi động, không restart thì tiến trình cũ vẫn giữ mật khẩu cũ trong bộ nhớ dù file đã ghi giá trị mới.
+- `setup.sh` (root project) là script idempotent chính: cài code-server + Tailscale, patch trang login code-server thêm icon hiện/ẩn mật khẩu (xem dưới), tạo password, chạy code-server nền (mở đúng `$CODE_SERVER_WORKSPACE`, mặc định `~/Code` — KHÔNG mở cả `$HOME`, tránh lộ toàn bộ home directory qua Mini App), bật Tailscale Funnel cho code-server, hỏi Telegram Bot Token, ghi `config.yaml`, hỏi khôi phục cấu hình AI tool qua Telegram (xem mục riêng bên dưới), cài Python deps (venv), chạy `bot.py` nền. Trạng thái tiến trình lưu PID ở `.run/` (gitignored) — chạy lại an toàn, không tạo tiến trình trùng lặp. Đổi mật khẩu code-server (bước 2) tự ép restart code-server (bước 3) — code-server chỉ đọc `config.yaml` lúc khởi động, không restart thì tiến trình cũ vẫn giữ mật khẩu cũ trong bộ nhớ dù file đã ghi giá trị mới.
+- **Tunnel: Tailscale Funnel (không phải cloudflared quick tunnel nữa)** — lý do đổi: `cloudflared tunnel --url` sinh URL `*.trycloudflare.com` NGẪU NHIÊN mỗi lần restart, không đủ để bot chọn giữa nhiều máy đang chạy. Tailscale Funnel cho URL cố định vĩnh viễn `https://<hostname>.<tailnet>.ts.net` theo tên máy trong tailnet. Máy có GUI: `tailscale up` mở trình duyệt login 1 lần; máy headless (server SSH-only, vd Oracle Cloud): cần `TAILSCALE_AUTHKEY` (tạo tại `https://login.tailscale.com/admin/settings/keys`) truyền qua env var, không cần trình duyệt. `setup.sh` dùng `tailscale serve --set-path=/ ...` + `tailscale funnel --bg 443` để expose code-server — **cú pháp CLI serve/funnel đổi theo phiên bản Tailscale**, nếu lệnh trong `setup.sh` lỗi thì kiểm tra `tailscale serve --help`/`tailscale funnel --help` trên máy thật và chỉnh lại. `wizard.html` (GUI path) **chưa có toggle riêng** cho bước Tailscale/Funnel (khác `codeServerAction`/`tunnelAction` cũ) — luôn coi là "lần đầu cấu hình", muốn ép cấu hình lại phải dùng nhánh terminal (`TELECODE_APPLYING` hoặc xoá cấu hình Tailscale cũ tay).
+- **Đa máy cùng chạy telecode (multi-server)**: vì mọi máy join chung 1 tailnet, `bot.py` gọi `tailscale status --json` (lệnh cục bộ, không cần đăng ký thủ công) để tự liệt kê máy đang online, health-check từng URL rồi trả về nút mở thẳng (nếu chỉ 1 máy sống) hoặc inline keyboard chọn máy (nếu ≥2 máy sống) khi nhận `/start`. Không có registry/state riêng cho danh sách server — luôn tính động mỗi lần `/start`.
+- **Đồng bộ cấu hình AI CLI tool (claude/gh copilot/gemini/deepseek) giữa các máy**: `/backup_configs <passphrase>` (chỉ chủ sở hữu — xem `OWNER_CHAT_ID`/`state.json` ở mục Security bên dưới) đóng gói (`scripts/backup-ai-configs.sh`, tar các file tồn tại trong danh sách allowlist cứng theo tool) + mã hoá `gpg --symmetric AES256` (passphrase KHÔNG suy ra từ bot token) rồi gửi lại vào chat dưới dạng file `.gpg`. Máy đích (`setup.sh`, bước 7b) mở 1 HTTP receiver 1-lần-dùng (`scripts/receive-ai-configs.py`, stdlib `http.server`, không thêm dependency) qua path riêng trên chính Tailscale Funnel đã bật — người dùng tải file `.gpg` Telegram gửi về rồi chạy 1 lệnh `curl` in sẵn (kèm mã 1-lần-dùng) để đẩy sang máy đích, `setup.sh` tự giải mã + giải nén đúng vị trí gốc + `chmod 600` cho file credentials. **Giới hạn nền tảng quan trọng**: Telegram Bot API không có API đọc lịch sử chat, bot không nhận lại được chính file nó vừa gửi — nên bước "máy nguồn gửi → máy đích tự động nhận" không thể tự động 100%, luôn cần đúng 1 bước tay (tải file Telegram về + chạy lệnh curl in sẵn).
 - **Wizard cài đặt qua web** (thay hỏi terminal): `wizard.py` (stdlib `http.server`, không thêm dependency) serve `assets/wizard.html` (1 file tĩnh, inline CSS/JS, không framework — pattern giống `yan2ai/public/setup.html`) tại `127.0.0.1:8899`. `setup.sh` detect GUI (`$DISPLAY`/`$WAYLAND_DISPLAY`, macOS luôn true, hoặc WSL qua `grep microsoft /proc/version`) — có GUI thì mở `wizard.py` (foreground, chờ user submit, truyền thêm `$PPID` làm `caller_pid` — xem mục tự đóng terminal bên dưới), ghi câu trả lời vào `$RUN_DIR/wizard-answers.json`, rồi tự thoát; `setup.sh` đọc file đó, re-exec chính nó ở nền với `TELECODE_APPLYING=1` (biến này khiến `ask_value`/`ask_choice` đọc từ JSON qua hàm `answers_get()` thay vì hỏi qua `/dev/tty`, dùng chung 100% logic 9 bước cũ không cần viết lại), rồi `exit 0` ngay. Không có GUI (server/VPS headless) → giữ nguyên luồng hỏi qua terminal cũ, không đổi gì.
 - **4 mục "đã cài/đang chạy" thu gọn** trong `wizard.html` (`codeServerAction`, `codeServerRunAction`, `cloudflaredAction`, `tunnelAction` — đúng 4 mục luôn mặc định "Giữ nguyên") dùng `collapsibleRadioGroup()` (native `<details>/<summary>`, không cần JS toggle riêng) thay vì `radioGroup()` thường. `password`/`token`/`botAction` vẫn hiển thị đầy đủ, không thu gọn.
 - **Cài xong tự động (chỉ khi qua wizard web)**: bước cuối `setup.sh` (nhánh `TELECODE_APPLYING=1`, sau khi bot chạy xong) làm theo đúng thứ tự: (1) tự mở app Telecode — gọi `resolve_app_mode_browser_bin()` + `--app=http://localhost:8443` giống hệt lúc bấm shortcut Desktop; (2) tự đóng terminal — `setup.sh` lấy `$PPID` lúc mở wizard (PID shell cha — do `install.sh` dùng `exec bash setup.sh` nên PID không đổi xuyên suốt, `$PPID` chính là shell tương tác gõ lệnh), truyền làm argv thứ 3 cho `wizard.py`; `wizard.py` lưu PID này vào `wizard-answers.json` dưới key `_callerPid` **ở phía server** (từ argv, không lấy field cùng tên nếu client gửi lên trong form — tránh giả mạo); đọc lại `_callerPid` và `kill` nếu process còn sống — không hỏi xác nhận. Thứ tự bắt buộc mở app TRƯỚC rồi mới kill terminal — nếu đảo ngược, tiến trình cha có thể chết trước khi kịp mở app. Nhánh headless không có PID này (không qua wizard nên không áp dụng). Tab wizard cũng tự gọi `window.close()` sau khi lưu (best-effort — trình duyệt có thể chặn nếu không coi đây là cửa sổ do script mở).
@@ -134,7 +136,7 @@ Purpose: Centralized config file
 Fields:
   TELEGRAM_BOT_TOKEN: str       # From @BotFather
   VSCODE_PORT: int              # code-server port (default: 8443)
-  VSCODE_PUBLIC_URL: str        # Cloudflare Tunnel URL
+  VSCODE_PUBLIC_URL: str        # Tailscale Funnel URL (https://<hostname>.<tailnet>.ts.net, cố định)
   VSCODE_PASSWORD: str          # code-server password
   BOT_POLLING_INTERVAL: int     # Seconds between polls
   MINI_APP_URL: str             # Where mini_app.html is hosted
@@ -298,10 +300,9 @@ Note: Each user sees same project directory
 
 ### Authentication Layers
 
-1. **Telegram Authentication**
-   - User must be Telegram user
-   - Bot token validates requests
-   - Only registered users can access
+1. **Telegram Authentication + Owner pairing**
+   - Bot token là secret chia sẻ — ai có token cũng gọi được API/chạy được instance (threat model hiện tại, không đổi).
+   - **Owner pairing** (`state.json`, gitignored, KHÔNG nằm trong `config.yaml` vì `setup.sh` ghi đè `config.yaml` mỗi lần chạy lại): `chat_id` của người `/start` đầu tiên được ghi nhận làm chủ sở hữu (`owner_chat_id`) — lệnh nhạy cảm (`/backup_configs`) chỉ chấp nhận đúng `chat_id` này (`is_owner()` trong `bot.py`), các lệnh còn lại (`/start`, `/help`, `/status`, `/info`) vẫn mở cho bất kỳ ai nhắn bot (giữ nguyên hành vi cũ).
 
 2. **Code-Server Authentication**
    - Password protection
@@ -309,8 +310,8 @@ Note: Each user sees same project directory
    - No public access (unless deliberately configured)
 
 3. **Tunnel Authentication**
-   - Cloudflare Tunnel uses zero-trust
-   - IP-based access control possible
+   - Tailscale Funnel — HTTPS public cố định theo tailnet, không phải Cloudflare Tunnel nữa (xem mục "Tunnel" ở phần Cài đặt)
+   - IP-based access control possible qua Tailscale ACL (chưa cấu hình, dùng mặc định)
    - Automatic HTTPS
 
 4. **Mini App Sandbox**

@@ -546,54 +546,58 @@ else
 fi
 echo ""
 
-# --- 4. cloudflared --------------------------------------------------------
-if command -v cloudflared &>/dev/null; then
-    CURRENT_VER="$(cloudflared --version 2>/dev/null | head -n1)"
-    if [ "$(ask_choice "4) cloudflared: đã cài (${CURRENT_VER})" "cloudflaredAction")" = "redo" ]; then
-        if [ "$OS" = "mac" ]; then brew install cloudflared
-        else
-            TMP_DEB="$(mktemp --suffix=.deb)"
-            curl -fsSL -o "$TMP_DEB" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-            sudo dpkg -i "$TMP_DEB"
-        fi
+# --- 4. Tailscale -----------------------------------------------------------
+# Thay cloudflared quick tunnel (URL *.trycloudflare.com ngẫu nhiên, đổi MỖI LẦN
+# restart) bằng Tailscale Funnel: URL public HTTPS cố định vĩnh viễn theo tên máy
+# trong tailnet (https://<hostname>.<tailnet>.ts.net) — cần thiết để bot.py (xem
+# discover_tailnet_peers()) biết được "server nào đang sống, ở URL nào" mà không
+# cần dựng thêm registry/backend riêng. Không giữ song song 2 cơ chế tunnel.
+if command -v tailscale &>/dev/null; then
+    CURRENT_VER="$(tailscale version 2>/dev/null | head -n1)"
+    if [ "$(ask_choice "4) Tailscale: đã cài (${CURRENT_VER})" "tailscaleAction")" = "redo" ]; then
+        curl -fsSL https://tailscale.com/install.sh | sh
     fi
 else
-    info "4) cloudflared chưa cài, đang cài..."
-    if [ "$OS" = "mac" ]; then brew install cloudflared
-    else
-        TMP_DEB="$(mktemp --suffix=.deb)"
-        curl -fsSL -o "$TMP_DEB" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-        sudo dpkg -i "$TMP_DEB"
-    fi
+    info "4) Tailscale chưa cài, đang cài..."
+    curl -fsSL https://tailscale.com/install.sh | sh
 fi
-ok "cloudflared sẵn sàng: $(command -v cloudflared)"
+ok "Tailscale sẵn sàng: $(command -v tailscale)"
 echo ""
 
-# --- 5. Tunnel cho code-server ---------------------------------------------
-wait_for_url() { # wait_for_url <logfile> -> in ra URL khi tìm thấy, timeout 30s
-    local log="$1" i=0 url=""
-    while [ $i -lt 30 ]; do
-        url="$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$log" 2>/dev/null | head -n1)"
-        [ -n "$url" ] && { echo "$url"; return 0; }
-        sleep 1; i=$((i+1))
-    done
-    return 1
-}
-
-T1_PID="$RUN_DIR/tunnel-code.pid"
-T1_LOG="$LOG_DIR/tunnel-code.log"
-if is_alive "$T1_PID" && [ -n "$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$T1_LOG" 2>/dev/null | head -n1)" ]; then
-    if [ "$(ask_choice "5) Tunnel code-server: đang chạy ($(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$T1_LOG" | head -n1))" "tunnelAction")" = "redo" ]; then
-        stop_pid "$T1_PID"; > "$T1_LOG"
+# --- 4b. Đăng nhập tailnet ----------------------------------------------------
+# Máy có GUI (PC cá nhân): `tailscale up` tự mở trình duyệt login 1 lần. Máy
+# headless (server chỉ SSH, vd Oracle Cloud): cần TAILSCALE_AUTHKEY (tạo tại
+# https://login.tailscale.com/admin/settings/keys) — không cần trình duyệt.
+if ! tailscale status &>/dev/null; then
+    info "4b) Đăng nhập Tailscale..."
+    if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+        sudo tailscale up --authkey="$TAILSCALE_AUTHKEY" --hostname="$(hostname)" --ssh
+    elif [ "$HAS_GUI" = "1" ]; then
+        sudo tailscale up --hostname="$(hostname)"
+    else
+        err "Máy headless (không GUI) cần biến TAILSCALE_AUTHKEY để đăng nhập không qua trình duyệt."
+        err "Tạo key tại https://login.tailscale.com/admin/settings/keys rồi chạy lại: TAILSCALE_AUTHKEY=tskey-... bash setup.sh"
+        exit 1
     fi
 fi
-if ! is_alive "$T1_PID"; then
-    info "Đang mở tunnel cho code-server..."
-    nohup cloudflared tunnel --url http://localhost:8443 > "$T1_LOG" 2>&1 &
-    echo $! > "$T1_PID"
+ok "Tailscale đã đăng nhập tailnet"
+echo ""
+
+# --- 5. Tailscale Funnel cho code-server -------------------------------------
+# tailscale serve/funnel: bind local port 8443 vào path "/" của URL public, funnel
+# bật để expose ra internet (không chỉ trong tailnet). LƯU Ý: cú pháp CLI
+# tailscale serve/funnel có thay đổi giữa các phiên bản — nếu lệnh dưới đây lỗi,
+# kiểm tra `tailscale serve --help`/`tailscale funnel --help` trên máy thật và
+# chỉnh lại cho khớp bản đã cài (đã note trong docs/oracle-cloud-setup.md).
+TS_DNS_NAME="$(tailscale status --json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null)"
+[ -n "$TS_DNS_NAME" ] || { err "Không lấy được tên máy trong tailnet — kiểm tra 'tailscale status'"; exit 1; }
+
+if [ "$(ask_choice "5) Tailscale Funnel: cấu hình cho code-server (https://$TS_DNS_NAME)" "funnelAction")" = "redo" ] || ! tailscale funnel status 2>/dev/null | grep -q "127.0.0.1:8443"; then
+    sudo tailscale serve --bg --set-path=/ http://127.0.0.1:8443
+    sudo tailscale funnel --bg 443
 fi
-VSCODE_PUBLIC_URL="$(wait_for_url "$T1_LOG")" || { err "Không lấy được URL tunnel code-server, xem $T1_LOG"; exit 1; }
-ok "VS Code tunnel: $VSCODE_PUBLIC_URL"
+VSCODE_PUBLIC_URL="https://$TS_DNS_NAME"
+ok "VS Code funnel: $VSCODE_PUBLIC_URL"
 echo ""
 
 # --- 6. Telegram Bot Token ---------------------------------------------------
@@ -625,6 +629,74 @@ ENABLE_DEBUG_MODE: false
 ALLOW_MULTIPLE_CONNECTIONS: false
 EOF
 ok "Đã ghi $CONFIG_FILE"
+echo ""
+
+# --- 7b. Khôi phục cấu hình AI tool (claude/copilot/gemini/deepseek) qua Telegram --
+# Chỉ hỏi khi chưa có sẵn các config đó trên máy này (máy đầu tiên setup xong thì bỏ
+# qua bước này) — không có API nào để bot tự "kéo" file 1 instance khác đã gửi vào
+# chat (Telegram không cho bot đọc lịch sử chat), nên vẫn cần 1 bước tay: người dùng
+# tải file .gpg Telegram gửi về rồi chạy 1 lệnh curl in sẵn để đẩy sang máy này.
+if [ ! -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$HOME/.config/github-copilot/oauth.json" ] && [ ! -f "$HOME/.gemini/oauth_creds.json" ]; then
+    echo "7b) Chưa thấy cấu hình AI tool (claude/copilot/gemini) nào trên máy này."
+    read -rp "    Khôi phục từ bản sao lưu qua Telegram? (y/N): " RESTORE_ANSWER < /dev/tty
+    if [ "$RESTORE_ANSWER" = "y" ] || [ "$RESTORE_ANSWER" = "Y" ]; then
+        RECV_PORT=10099
+        RECV_OUT="$RUN_DIR/ai-configs-incoming.gpg"
+        RECV_LOG="$LOG_DIR/receive-ai-configs.log"
+        RECV_PID="$RUN_DIR/receive-ai-configs.pid"
+        rm -f "$RECV_OUT" "$RECV_LOG"
+
+        # Dùng chung Tailscale Funnel port 443 đã bật ở bước 5, thêm 1 path riêng
+        # trỏ về receiver cục bộ (không cần mở thêm port funnel mới).
+        sudo tailscale serve --bg --set-path=/telecode-ai-config-upload "http://127.0.0.1:$RECV_PORT" \
+            || warn "Không cấu hình được tailscale serve cho receiver — kiểm tra 'tailscale serve --help' và tự chạy lại lệnh cho khớp bản đã cài."
+
+        nohup python3 "$DIR/scripts/receive-ai-configs.py" "$RECV_OUT" "$RECV_PORT" > "$RECV_LOG" 2>&1 &
+        echo $! > "$RECV_PID"
+
+        UPLOAD_CODE=""
+        for _ in $(seq 1 10); do
+            UPLOAD_CODE="$(python3 -c "import json; print(json.load(open('$RECV_LOG')).get('code',''))" 2>/dev/null)"
+            [ -n "$UPLOAD_CODE" ] && break
+            sleep 0.5
+        done
+
+        if [ -z "$UPLOAD_CODE" ]; then
+            warn "Receiver không khởi động được — xem $RECV_LOG, bỏ qua bước khôi phục (đăng nhập tay các AI tool sau)."
+        else
+            echo ""
+            info "    1. Mở Telegram, gửi: /backup_configs <passphrase> cho bot (máy nguồn phải đang chạy bot.py)."
+            info "    2. Tải file .gpg bot gửi về máy đang có Telegram, rồi chạy (thay <đường-dẫn-file-vừa-tải>):"
+            echo "       curl -F \"file=@<đường-dẫn-file-vừa-tải>\" \"https://$TS_DNS_NAME/telecode-ai-config-upload?code=$UPLOAD_CODE\""
+            echo ""
+            info "    Đang chờ tối đa 5 phút... (Ctrl+C để bỏ qua, đăng nhập tay các AI tool sau)"
+            WAITED=0
+            while [ ! -s "$RECV_OUT" ] && [ $WAITED -lt 300 ] && is_alive "$RECV_PID"; do
+                sleep 3; WAITED=$((WAITED+3))
+            done
+            stop_pid "$RECV_PID"
+
+            if [ -s "$RECV_OUT" ]; then
+                read -rsp "    Nhập lại passphrase để giải mã: " RESTORE_PASSPHRASE < /dev/tty; echo ""
+                RESTORE_TMP_TAR="$(mktemp --suffix=.tar.gz)"
+                if echo "$RESTORE_PASSPHRASE" | gpg --batch --yes --decrypt --passphrase-fd 0 -o "$RESTORE_TMP_TAR" "$RECV_OUT" 2>/dev/null; then
+                    tar -xzf "$RESTORE_TMP_TAR" -C "$HOME"
+                    # Siết lại permission cho file credentials (tar giữ nguyên mode gốc,
+                    # nhưng đề phòng umask máy đích khác máy nguồn).
+                    chmod 600 "$HOME/.claude/.credentials.json" "$HOME/.claude.json" \
+                        "$HOME/.config/gh/hosts.yml" "$HOME/.config/github-copilot/oauth.json" \
+                        "$HOME/.gemini/oauth_creds.json" 2>/dev/null || true
+                    ok "Đã khôi phục cấu hình AI tool."
+                else
+                    err "Giải mã thất bại — sai passphrase? File mã hoá còn ở $RECV_OUT, thử lại tay: gpg --decrypt -o out.tar.gz $RECV_OUT"
+                fi
+                shred -u "$RESTORE_TMP_TAR" 2>/dev/null || rm -f "$RESTORE_TMP_TAR"
+            else
+                warn "Không nhận được file trong thời gian chờ — bỏ qua, đăng nhập tay các AI tool sau."
+            fi
+        fi
+    fi
+fi
 echo ""
 
 # --- 8. Python venv + dependencies -------------------------------------------

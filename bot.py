@@ -5,10 +5,14 @@ Allows users to open VS Code from Telegram via Web App
 """
 
 import os
+import json
 import logging
+import shutil
+import subprocess
+import tempfile
 import yaml
 from pathlib import Path
-from telegram import Update, WebAppInfo, MenuButtonWebApp
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonCommands
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Configure logging
@@ -21,6 +25,10 @@ logger = logging.getLogger(__name__)
 # Configuration
 CONFIG_FILE = Path(__file__).parent / "config.yaml"
 ENV_FILE = Path(__file__).parent / ".env"
+# state.json: chỉ bot.py đọc/ghi, KHÔNG đụng tới config.yaml — setup.sh ghi đè
+# config.yaml toàn bộ mỗi lần chạy lại, sẽ xoá mất owner_chat_id nếu để chung.
+STATE_FILE = Path(__file__).parent / "state.json"
+BACKUP_SCRIPT = Path(__file__).parent / "scripts" / "backup-ai-configs.sh"
 
 def load_config():
     """Load configuration from config.yaml"""
@@ -66,23 +74,135 @@ logger.info(f"✅ Bot configured:")
 logger.info(f"   Bot Token: {TELEGRAM_BOT_TOKEN[:10]}...")
 logger.info(f"   VS Code URL: {VSCODE_PUBLIC_URL}")
 
+
+def load_state() -> dict:
+    if not STATE_FILE.exists():
+        return {"owner_chat_id": None}
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except Exception:
+        return {"owner_chat_id": None}
+
+
+def save_state(state: dict) -> None:
+    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def is_owner(update: Update) -> bool:
+    owner_chat_id = load_state().get("owner_chat_id")
+    return owner_chat_id is not None and update.effective_chat.id == owner_chat_id
+
+
+def discover_tailnet_peers() -> list[tuple[str, str]]:
+    """Liệt kê máy đang online trong tailnet (chỉ gọi lệnh cục bộ `tailscale status`,
+    không cần token/API riêng). Trả về [] nếu Tailscale chưa cài/chưa cấu hình trên
+    máy đang chạy bot.py — start() fallback về VSCODE_PUBLIC_URL của chính instance
+    này khi rỗng, giữ tương thích ngược cho máy chưa cài Tailscale."""
+    try:
+        out = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout
+        data = json.loads(out)
+    except Exception:
+        return []
+
+    peers = []
+    self_info = data.get("Self") or {}
+    if self_info.get("DNSName"):
+        peers.append((self_info.get("HostName", "self"), self_info["DNSName"].rstrip(".")))
+    for peer in (data.get("Peer") or {}).values():
+        if peer.get("Online") and peer.get("DNSName"):
+            peers.append((peer.get("HostName", "peer"), peer["DNSName"].rstrip(".")))
+    return peers
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Start command handler — nút mở VS Code nằm ở menu button cạnh khung nhập tin nhắn (xem post_init)."""
+    """Start command handler — ghi nhận chủ sở hữu lần đầu, health-check các máy
+    trong tailnet rồi trả về nút/inline keyboard mở đúng (những) máy đang online."""
     user = update.message.from_user
     logger.info(f"👤 User started bot: {user.first_name} (@{user.username})")
 
-    welcome_message = (
-        "🚀 *VS Code Remote Control*\n\n"
-        "Bấm nút 🔧 cạnh khung nhập tin nhắn để mở VS Code từ điện thoại!\n\n"
-        "✨ Features:\n"
-        "• Full VS Code interface\n"
-        "• Use Claude for coding assistance\n"
-        "• Edit files remotely\n"
-        "• Run terminal commands\n\n"
-        "ℹ️ Make sure your computer is running VS Code Server."
-    )
+    state = load_state()
+    if state.get("owner_chat_id") is None:
+        state["owner_chat_id"] = update.effective_chat.id
+        save_state(state)
+        logger.info(f"✅ Đã ghi nhận chủ sở hữu: chat_id={update.effective_chat.id}")
 
-    await update.message.reply_text(welcome_message, parse_mode='Markdown')
+    peers = discover_tailnet_peers()
+    candidates = peers if peers else [("VS Code", VSCODE_PUBLIC_URL.replace("https://", "").replace("http://", ""))]
+
+    import aiohttp
+    alive = []
+    async with aiohttp.ClientSession() as session:
+        for name, dns in candidates:
+            url = f"https://{dns}" if not dns.startswith("http") else dns
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    alive.append((name, url))
+            except Exception:
+                continue
+
+    if not alive:
+        await update.message.reply_text("⚠️ Hiện chưa có server telecode nào online. Kiểm tra lại code-server/tailscale trên máy chạy telecode.")
+        return
+
+    if len(alive) == 1:
+        name, url = alive[0]
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(f"🔧 Mở VS Code ({name})", url=url)]])
+        text = "🚀 *VS Code Remote Control*\n\nBấm nút bên dưới để mở VS Code từ điện thoại!"
+    else:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(f"🖥️ {name}", url=url)] for name, url in alive])
+        text = "🚀 *VS Code Remote Control*\n\nCó nhiều máy đang online — chọn máy muốn mở:"
+
+    await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)
+
+
+async def backup_configs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/backup_configs <passphrase> — chỉ chủ sở hữu gọi được. Đóng gói + mã hoá
+    cấu hình AI CLI tool (claude/copilot/gemini/deepseek) trên máy đang chạy bot.py
+    này, gửi lại vào chính chat dưới dạng file .gpg."""
+    if not is_owner(update):
+        await update.message.reply_text("⛔ Lệnh này chỉ dành cho chủ sở hữu bot.")
+        return
+    if not context.args:
+        await update.message.reply_text("Dùng: /backup_configs <passphrase>\n(Passphrase dùng để mã hoá — cần nhớ để giải mã lại ở máy đích.)")
+        return
+    passphrase = " ".join(context.args)
+
+    # Xoá ngay tin nhắn chứa passphrase (best-effort, private chat cho phép bot
+    # xoá message trong vòng 48h) để không lưu passphrase dạng plaintext lâu trong lịch sử chat.
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not BACKUP_SCRIPT.exists():
+        await context.bot.send_message(update.effective_chat.id, "❌ Thiếu scripts/backup-ai-configs.sh")
+        return
+
+    status_msg = await context.bot.send_message(update.effective_chat.id, "⏳ Đang đóng gói cấu hình AI tool...")
+    tmp_out = Path(tempfile.mkstemp(suffix=".tar.gz.gpg")[1])
+    try:
+        proc = subprocess.run(
+            ["bash", str(BACKUP_SCRIPT), str(tmp_out)],
+            input=passphrase, capture_output=True, text=True, timeout=60,
+        )
+        if proc.returncode != 0:
+            await status_msg.edit_text(f"❌ Sao lưu thất bại:\n{proc.stderr[-500:]}")
+            return
+        await context.bot.send_document(
+            update.effective_chat.id,
+            document=tmp_out.open("rb"),
+            filename="telecode-ai-configs.tar.gz.gpg",
+            caption="🔐 Bundle cấu hình AI tool (mã hoá AES256). Dùng đúng passphrase vừa nhập để giải mã ở máy đích.",
+        )
+        await status_msg.delete()
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Lỗi: {e}")
+    finally:
+        if tmp_out.exists():
+            shutil.rmtree(tmp_out, ignore_errors=True) if tmp_out.is_dir() else tmp_out.unlink(missing_ok=True)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Help command handler"""
@@ -146,13 +266,11 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(info_text, parse_mode='Markdown')
 
 async def post_init(application: Application) -> None:
-    # Đặt nút menu cố định cạnh khung nhập tin nhắn Telegram (áp dụng mặc định cho
-    # mọi chat với bot) — không cần cấu hình qua BotFather. Bot API không cho icon
-    # ảnh tuỳ chỉnh ở nút này, chỉ text ngắn.
-    await application.bot.set_chat_menu_button(
-        menu_button=MenuButtonWebApp(text="🔧 VS Code", web_app=WebAppInfo(url=VSCODE_PUBLIC_URL))
-    )
-    logger.info("✅ Đã đặt menu button 'VS Code' cạnh khung nhập tin nhắn")
+    # MenuButtonWebApp trỏ 1 URL TĨNH — không còn phù hợp vì URL giờ động theo số
+    # server đang online (xem start()/discover_tailnet_peers). Đổi sang menu lệnh
+    # chuẩn, /start là điểm vào chính để lấy URL luôn mới nhất.
+    await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    logger.info("✅ Đã đặt menu button dạng danh sách lệnh (/start là điểm vào chính)")
 
 def main() -> None:
     """Start the bot."""
@@ -164,6 +282,7 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("info", info_command))
+    application.add_handler(CommandHandler("backup_configs", backup_configs_command))
     
     # Log bot info
     logger.info("="*50)
