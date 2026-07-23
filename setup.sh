@@ -438,14 +438,21 @@ echo ""
 # Copilot: Sign In"), không đăng nhập được thì extension chỉ nằm im, không lỗi.
 install_vsix_extension() { # install_vsix_extension <publisher> <name>
     local publisher="$1" name="$2" vsix="$RUN_DIR/${name}.vsix"
-    if ! curl -fsSL -o "$vsix" \
+    # --compressed: Marketplace CDN trả file .vsix đã gzip sẵn (content-encoding:
+    # gzip) -> thiếu cờ này curl lưu thẳng byte gzip thô xuống đĩa (không phải
+    # zip hợp lệ), `code-server --install-extension` cài lỗi âm thầm nếu không
+    # kiểm tra exit code (bug thật đã gặp: "ok" vẫn hiện dù cài thất bại).
+    if ! curl -fsSL --compressed -o "$vsix" \
         "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/${publisher}/vsextensions/${name}/latest/vspackage"; then
         warn "   Tải ${publisher}.${name} thất bại (kiểm tra mạng) — bỏ qua, chạy lại setup.sh sau để thử lại."
         return 1
     fi
-    code-server --install-extension "$vsix" --force >/dev/null 2>&1
+    if code-server --install-extension "$vsix" --force; then
+        ok "   Đã cài ${publisher}.${name}"
+    else
+        warn "   Cài ${publisher}.${name} thất bại (file .vsix lỗi hoặc code-server báo lỗi ở trên) — chạy lại setup.sh sau để thử lại."
+    fi
     rm -f "$vsix"
-    ok "   Đã cài ${publisher}.${name}"
 }
 
 INSTALLED_EXT="$(code-server --list-extensions 2>/dev/null | tr '[:upper:]' '[:lower:]')"
