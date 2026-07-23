@@ -22,11 +22,20 @@
 
 ### Cách nhanh nhất — 1 lệnh (khuyến nghị)
 
+**Linux / macOS:**
+
 ```bash
 curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/main/scripts/install.sh | bash
 ```
 
-Lệnh này tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu bạn đặt biến môi trường này), rồi chạy `setup.sh` — script tự kiểm tra/cài `code-server` + `cloudflared`, mở 2 tunnel (VS Code + mini_app.html), hỏi Telegram Bot Token, ghi `config.yaml`, rồi khởi động bot nền. Chạy lại đúng lệnh này bất cứ lúc nào để cập nhật code + khởi động lại — script hỏi giữ nguyên hay cài/chạy lại từng phần, không hỏi lại token nếu đã cấu hình.
+**Windows:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "irm https://gitlab.com/pvgiang396/telecode/-/raw/main/scripts/install.ps1 | iex"
+```
+code-server chỉ hỗ trợ chính thức Linux/macOS — trên Windows lệnh trên tự cài WSL2 (Ubuntu) nếu chưa có, rồi chạy `install.sh` bên trong đó. Nếu WSL vừa được cài lần đầu, làm theo hướng dẫn khởi động lại máy rồi chạy lại đúng lệnh.
+
+Lệnh trên tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu bạn đặt biến môi trường này), rồi chạy `setup.sh` — script tự kiểm tra/cài `code-server` + `cloudflared`, mở 2 tunnel (VS Code + mini_app.html), hỏi Telegram Bot Token, ghi `config.yaml`, rồi khởi động bot nền. Chạy lại đúng lệnh này bất cứ lúc nào để cập nhật code + khởi động lại — script hỏi giữ nguyên hay cài/chạy lại từng phần (chọn bằng phím ↑/↓ + Enter), không hỏi lại token nếu đã cấu hình.
 
 Cần chuẩn bị trước: token bot Telegram từ [@BotFather](https://t.me/BotFather) (gửi `/newbot` trên điện thoại).
 

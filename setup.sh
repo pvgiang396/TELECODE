@@ -44,12 +44,43 @@ ask_value() {
 }
 
 # ask_choice <mô tả trạng thái hiện tại> -> in ra "keep" hoặc "redo"
+# Menu radio 2 dòng chọn bằng phím mũi tên (↑/↓ + Enter), mặc định "Giữ nguyên".
+# Fallback về nhập số 1/2 nếu không có TTY thật (vd chạy trong CI/pipe không gắn terminal).
 ask_choice() {
     local desc="$1" choice
     echo "$desc"
-    read -rp "  1) Giữ nguyên   2) Cài lại/khởi động lại  [mặc định 1]: " choice < /dev/tty
-    choice=${choice:-1}
-    [ "$choice" = "2" ] && echo "redo" || echo "keep"
+
+    if [ ! -r /dev/tty ]; then
+        read -rp "  1) Giữ nguyên   2) Cài lại/khởi động lại  [mặc định 1]: " choice
+        choice=${choice:-1}
+        [ "$choice" = "2" ] && echo "redo" || echo "keep"
+        return
+    fi
+
+    local opts=("Giữ nguyên" "Cài lại / khởi động lại") sel=0 i key rest
+    tput civis 2>/dev/null
+    for i in "${!opts[@]}"; do echo "  ○ ${opts[$i]}"; done
+    while true; do
+        # Vẽ lại 2 dòng: đưa con trỏ lên đầu danh sách rồi in lại có đánh dấu ●
+        tput cuu "${#opts[@]}" 2>/dev/null
+        for i in "${!opts[@]}"; do
+            tput el 2>/dev/null
+            if [ "$i" -eq "$sel" ]; then echo "  ${GREEN}●${NC} ${opts[$i]}"; else echo "  ○ ${opts[$i]}"; fi
+        done
+        IFS= read -rsn1 key < /dev/tty
+        if [ "$key" = $'\x1b' ]; then
+            read -rsn2 -t 0.01 rest < /dev/tty
+            key+="$rest"
+            case "$key" in
+                $'\x1b[A') sel=0 ;; # mũi tên lên
+                $'\x1b[B') sel=1 ;; # mũi tên xuống
+            esac
+        elif [ -z "$key" ]; then
+            break # Enter
+        fi
+    done
+    tput cnorm 2>/dev/null
+    [ "$sel" -eq 1 ] && echo "redo" || echo "keep"
 }
 
 is_alive() { # is_alive <pidfile>
@@ -82,6 +113,119 @@ fi
 ok "code-server sẵn sàng: $(command -v code-server)"
 echo ""
 
+# --- 1b. Patch trang login code-server: thêm icon hiện/ẩn mật khẩu ---------
+# code-server không có tuỳ chọn chính thức để tuỳ biến trang login -> vá thẳng
+# file HTML/CSS đóng gói sẵn (login.js đọc lại các file này ở MỖI request, không
+# cache, nên áp dụng ngay, không cần restart). Nhược điểm: bị ghi đè mỗi khi
+# code-server cài lại/nâng cấp -> gọi hàm này lại mỗi lần chạy setup.sh (idempotent
+# qua marker "telecode-eye-toggle").
+find_code_server_root() {
+    local bin resolved dir
+    bin="$(command -v code-server)" || return 1
+    resolved="$(readlink -f "$bin" 2>/dev/null || echo "$bin")"
+    dir="$(dirname "$resolved")"
+    while [ "$dir" != "/" ]; do
+        [ -f "$dir/src/browser/pages/login.html" ] && { echo "$dir"; return 0; }
+        dir="$(dirname "$dir")"
+    done
+    for p in /usr/lib/code-server /usr/local/lib/code-server "$HOME/.local/lib/code-server"; do
+        [ -f "$p/src/browser/pages/login.html" ] && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+patch_code_server_login() {
+    local root html css
+    root="$(find_code_server_root)" || { warn "Không tìm thấy thư mục cài code-server để thêm icon hiện mật khẩu, bỏ qua."; return; }
+    html="$root/src/browser/pages/login.html"
+    css="$root/src/browser/pages/login.css"
+    grep -q "telecode-eye-toggle" "$html" 2>/dev/null && return
+
+    info "1b) Thêm icon hiện/ẩn mật khẩu vào trang đăng nhập code-server..."
+    local SUDO=""
+    [ -w "$html" ] || SUDO="sudo"
+    $SUDO python3 - "$html" "$css" <<'PYEOF'
+import sys
+
+html_path, css_path = sys.argv[1], sys.argv[2]
+
+with open(html_path, "r", encoding="utf-8") as f:
+    html = f.read()
+
+old = '''            <div class="field">
+              <input
+                required
+                autofocus
+                class="password"
+                type="password"
+                placeholder="{{I18N_PASSWORD_PLACEHOLDER}}"
+                name="password"
+                autocomplete="current-password"
+              />
+              <input class="submit -button" value="{{I18N_SUBMIT}}" type="submit" />
+            </div>'''
+
+new = '''            <!-- telecode-eye-toggle -->
+            <div class="field">
+              <div class="password-wrap">
+                <input
+                  required
+                  autofocus
+                  class="password"
+                  type="password"
+                  placeholder="{{I18N_PASSWORD_PLACEHOLDER}}"
+                  name="password"
+                  autocomplete="current-password"
+                />
+                <button type="button" class="toggle-password" aria-label="Hien/an mat khau" onclick="var p=this.previousElementSibling; var showing=p.type==='text'; p.type = showing ? 'password' : 'text'; this.textContent = showing ? String.fromCodePoint(0x1F441) : String.fromCodePoint(0x1F648);">&#128065;</button>
+              </div>
+              <input class="submit -button" value="{{I18N_SUBMIT}}" type="submit" />
+            </div>'''
+
+if old in html:
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html.replace(old, new))
+else:
+    print("WARN: khong tim thay khoi HTML mat khau de patch (co the code-server da doi cau truc)")
+    sys.exit(0)
+
+css_addition = """
+
+/* telecode-eye-toggle */
+.password-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+}
+.password-wrap > .password {
+  flex: 1;
+  padding-right: 40px;
+}
+.password-wrap > .toggle-password {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+}
+"""
+with open(css_path, "a", encoding="utf-8") as f:
+    f.write(css_addition)
+PYEOF
+    if grep -q "telecode-eye-toggle" "$html" 2>/dev/null; then
+        ok "Đã thêm icon hiện/ẩn mật khẩu vào trang login code-server"
+    else
+        warn "Không patch được trang login (có thể phiên bản code-server đã đổi cấu trúc HTML) — bỏ qua, không chặn setup"
+    fi
+}
+patch_code_server_login
+echo ""
+
 # --- 2. Password code-server ---------------------------------------------
 CS_CONFIG="$HOME/.config/code-server/config.yaml"
 mkdir -p "$(dirname "$CS_CONFIG")"
@@ -99,7 +243,12 @@ echo ""
 
 # --- 3. Chạy code-server nền ----------------------------------------------
 CS_PID="$RUN_DIR/code-server.pid"
-if is_alive "$CS_PID"; then
+if [ "$CS_PASSWORD" != "$CURRENT_PW" ] && is_alive "$CS_PID"; then
+    # code-server chỉ đọc config.yaml lúc khởi động — đổi mật khẩu mà không restart
+    # thì tiến trình cũ vẫn dùng mật khẩu cũ trong bộ nhớ, gõ mật khẩu mới sẽ luôn sai.
+    warn "Mật khẩu vừa đổi — bắt buộc khởi động lại code-server để áp dụng."
+    stop_pid "$CS_PID"
+elif is_alive "$CS_PID"; then
     if [ "$(ask_choice "3) code-server: đang chạy (PID $(cat "$CS_PID"))")" = "redo" ]; then
         stop_pid "$CS_PID"
     fi
