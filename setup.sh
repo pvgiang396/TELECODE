@@ -282,6 +282,15 @@ ok "Đã ghi $CS_CONFIG"
 echo ""
 
 # --- 3. Chạy code-server nền ----------------------------------------------
+# Chỉ mở đúng thư mục project (mặc định ~/Code), KHÔNG mở cả $HOME — mở cả $HOME
+# nghĩa là ai vào được VS Code từ điện thoại cũng duyệt/sửa được mọi file khác
+# trong home directory, không chỉ project đang cần làm việc.
+CODE_SERVER_WORKSPACE="${CODE_SERVER_WORKSPACE:-$HOME/Code}"
+if [ ! -d "$CODE_SERVER_WORKSPACE" ]; then
+    warn "Không thấy thư mục $CODE_SERVER_WORKSPACE — dùng \$HOME thay thế. Đặt biến CODE_SERVER_WORKSPACE nếu muốn trỏ nơi khác."
+    CODE_SERVER_WORKSPACE="$HOME"
+fi
+
 CS_PID="$RUN_DIR/code-server.pid"
 if [ "$CS_PASSWORD" != "$CURRENT_PW" ] && is_alive "$CS_PID"; then
     # code-server chỉ đọc config.yaml lúc khởi động — đổi mật khẩu mà không restart
@@ -294,10 +303,10 @@ elif is_alive "$CS_PID"; then
     fi
 fi
 if ! is_alive "$CS_PID"; then
-    nohup code-server --bind-addr 127.0.0.1:8443 "$HOME" > "$LOG_DIR/code-server.log" 2>&1 &
+    nohup code-server --bind-addr 127.0.0.1:8443 "$CODE_SERVER_WORKSPACE" > "$LOG_DIR/code-server.log" 2>&1 &
     echo $! > "$CS_PID"
     sleep 2
-    ok "code-server đang chạy tại http://localhost:8443 (PID $(cat "$CS_PID"))"
+    ok "code-server đang chạy tại http://localhost:8443, thư mục: $CODE_SERVER_WORKSPACE (PID $(cat "$CS_PID"))"
 fi
 echo ""
 

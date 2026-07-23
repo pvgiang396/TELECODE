@@ -72,6 +72,16 @@ docker-compose down
 
 ## 🔐 Bảo Mật
 
+### Giới hạn thư mục code-server mở
+
+`setup.sh` chỉ mở `~/Code` (không mở cả `$HOME`) — tránh việc ai vào được VS Code từ điện thoại cũng duyệt/sửa được mọi file khác trong home directory. Muốn trỏ thư mục khác, đặt biến môi trường trước khi chạy:
+
+```bash
+CODE_SERVER_WORKSPACE=~/my-project bash setup.sh
+```
+
+Nếu thư mục không tồn tại, script tự cảnh báo và fallback về `$HOME`.
+
 ### Bật Password cho Code-Server
 
 ```yaml
