@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -Command "irm https://gitlab.com/pvgiang396/t
 ```
 code-server chỉ hỗ trợ chính thức Linux/macOS — trên Windows lệnh trên tự cài WSL2 (Ubuntu) nếu chưa có, rồi chạy `install.sh` bên trong đó. Nếu WSL vừa được cài lần đầu, làm theo hướng dẫn khởi động lại máy rồi chạy lại đúng lệnh.
 
-Lệnh trên tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu bạn đặt biến môi trường này), rồi chạy `setup.sh` — script tự kiểm tra/cài `code-server` + `cloudflared`, mở 2 tunnel (VS Code + mini_app.html), hỏi Telegram Bot Token, ghi `config.yaml`, rồi khởi động bot nền. Chạy lại đúng lệnh này bất cứ lúc nào để cập nhật code + khởi động lại — script hỏi giữ nguyên hay cài/chạy lại từng phần (chọn bằng phím ↑/↓ + Enter), không hỏi lại token nếu đã cấu hình.
+Lệnh trên tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu bạn đặt biến môi trường này), rồi chạy `setup.sh` — script tự kiểm tra/cài `code-server` + `cloudflared`, mở tunnel cho VS Code, hỏi Telegram Bot Token, ghi `config.yaml`, rồi khởi động bot nền. Chạy lại đúng lệnh này bất cứ lúc nào để cập nhật code + khởi động lại — script hỏi giữ nguyên hay cài/chạy lại từng phần (chọn bằng phím ↑/↓ + Enter), không hỏi lại token nếu đã cấu hình.
 
 Cần chuẩn bị trước: token bot Telegram từ [@BotFather](https://t.me/BotFather) (gửi `/newbot` trên điện thoại).
 
@@ -49,14 +49,14 @@ cd telecode
 bash setup.sh
 ```
 
-`setup.sh` làm toàn bộ các việc: cài code-server + cloudflared, tạo password, chạy code-server nền, mở tunnel, tự sửa `mini_app.html`, tạo `config.yaml` từ `config.example.yaml`, cài dependency Python (venv riêng), và chạy `bot.py` nền. Chạy lại `bash setup.sh` bất cứ lúc nào — idempotent, không tạo tiến trình trùng lặp.
+`setup.sh` làm toàn bộ các việc: cài code-server + cloudflared, thêm icon hiện/ẩn mật khẩu vào trang login code-server, tạo password, chạy code-server nền, mở tunnel, tạo `config.yaml` từ `config.example.yaml`, cài dependency Python (venv riêng), và chạy `bot.py` nền. Chạy lại `bash setup.sh` bất cứ lúc nào — idempotent, không tạo tiến trình trùng lặp.
 
 ### Trên Telegram
 
 - Mở bot (search username bot của bạn)
 - Gửi `/start`
 - Click nút "🔧 Open VS Code"
-- VS Code sẽ mở trong Telegram Mini App!
+- VS Code (code-server) mở **trực tiếp** trong Mini App (không qua iframe trung gian) — đăng nhập bằng mật khẩu đã đặt ở bước cấu hình `config.yaml`.
 
 ## 🐳 Cách chạy với Docker (thay thế setup.sh)
 
@@ -99,18 +99,24 @@ sudo ufw enable
 ## 📁 Cấu trúc Project
 
 ```
-telegram-vscode-mini-app/
-├── bot.py                 # Telegram bot chính
-├── mini_app.html          # Giao diện web
+telecode/
+├── bot.py                 # Telegram bot chính — nút mở thẳng VSCODE_PUBLIC_URL
+├── mini_app.html          # KHÔNG dùng trong luồng mặc định nữa (xem "Vì sao không dùng iframe" bên dưới) — giữ lại để tham khảo
 ├── requirements.txt       # Python dependencies
 ├── config.example.yaml    # File cấu hình mẫu
 ├── docker-compose.yml     # Docker setup
 ├── Dockerfile             # Container config
-├── setup.sh              # Setup script
+├── setup.sh              # Setup script chính (idempotent)
+├── scripts/install.sh    # Bootstrap cài qua curl (Linux/macOS)
+├── scripts/install.ps1   # Bootstrap cài qua PowerShell (Windows, dùng WSL2)
 ├── README.md             # File này
 ├── CLAUDE.md             # Hướng dẫn cho Claude AI
 └── .env.example          # Biến môi trường mẫu
 ```
+
+### Vì sao không dùng iframe (mini_app.html)?
+
+Bản đầu mở VS Code qua iframe (`mini_app.html` nhúng code-server từ 1 tunnel khác). code-server đặt cookie `SameSite=Lax` — khi load trong iframe khác domain, nhiều WebView di động (đặc biệt iOS WKWebView mà Telegram dùng) coi cookie này là bên thứ 3 và chặn lưu, khiến đăng nhập đúng mật khẩu vẫn quay lại y hệt màn login. Nút bot giờ mở **thẳng** URL code-server (top-level navigation trong Mini App) — cookie thành first-party, hoạt động bình thường.
 
 ## 🛠️ Troubleshooting
 
@@ -132,9 +138,8 @@ curl http://localhost:8443
 ./cloudflared tunnel --url http://localhost:8443
 ```
 
-### Frame bị block trên Telegram
-- Telegram Mini App có limitation với CORS
-- Dùng Cloudflare Tunnel để bypass
+### Đăng nhập đúng mật khẩu nhưng bị đá về lại màn login
+- Đây là lỗi third-party cookie khi chạy qua iframe (xem mục "Vì sao không dùng iframe" ở trên) — bản hiện tại đã mở thẳng URL, không còn iframe nữa. Nếu vẫn gặp, kiểm tra `config.yaml`/`~/.config/code-server/config.yaml` có cùng 1 password và code-server đã được **restart** sau khi đổi password (code-server chỉ đọc config lúc khởi động).
 
 ## 📚 Tài liệu thêm
 
@@ -151,8 +156,8 @@ curl http://localhost:8443
 - Dùng VS Code Insiders cho performance tốt hơn
 - Giới hạn số file watcher
 
-### Customize giao diện
-Edit `mini_app.html` để thay đổi theme, layout, hoặc thêm shortcut
+### Customize giao diện đăng nhập
+Trang login (`{cài đặt code-server}/src/browser/pages/login.html` + `login.css`) được `setup.sh` tự vá thêm icon hiện/ẩn mật khẩu — sửa trực tiếp hàm `patch_code_server_login()` trong `setup.sh` nếu muốn tuỳ biến thêm.
 
 ### Dùng với Claude
 Xem `CLAUDE.md` để hướng dẫn AI làm việc với project này

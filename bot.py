@@ -52,7 +52,6 @@ except FileNotFoundError:
 
 TELEGRAM_BOT_TOKEN = CONFIG.get('TELEGRAM_BOT_TOKEN')
 VSCODE_PUBLIC_URL = CONFIG.get('VSCODE_PUBLIC_URL', 'http://localhost:8443')
-MINI_APP_URL = CONFIG.get('MINI_APP_URL', 'https://your-domain.com/mini_app.html')
 
 if not TELEGRAM_BOT_TOKEN:
     logger.error("❌ TELEGRAM_BOT_TOKEN not found in config or environment")
@@ -66,7 +65,6 @@ if not VSCODE_PUBLIC_URL:
 logger.info(f"✅ Bot configured:")
 logger.info(f"   Bot Token: {TELEGRAM_BOT_TOKEN[:10]}...")
 logger.info(f"   VS Code URL: {VSCODE_PUBLIC_URL}")
-logger.info(f"   Mini App URL: {MINI_APP_URL}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -76,11 +74,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.message.from_user
     logger.info(f"👤 User started bot: {user.first_name} (@{user.username})")
     
-    # Create inline keyboard with Web App button
+    # Mở thẳng URL code-server (không qua iframe mini_app.html): code-server đặt
+    # cookie SameSite=Lax, nếu load trong iframe khác domain (mini_app.html) thì
+    # nhiều WebView (đặc biệt iOS WKWebView dùng bởi Telegram) coi đây là cookie
+    # bên thứ 3 và chặn lưu -> đăng nhập luôn báo lại y hệt màn login dù đúng mật
+    # khẩu. Mở trực tiếp = top-level navigation = cookie first-party, hoạt động bình thường.
     keyboard = [[
         InlineKeyboardButton(
             text="🔧 Open VS Code",
-            web_app=WebAppInfo(url=MINI_APP_URL)
+            web_app=WebAppInfo(url=VSCODE_PUBLIC_URL)
         )
     ]]
     
@@ -181,7 +183,6 @@ def main() -> None:
     logger.info("="*50)
     logger.info("✅ Bot started successfully!")
     logger.info(f"🔗 VS Code URL: {VSCODE_PUBLIC_URL}")
-    logger.info(f"📱 Mini App URL: {MINI_APP_URL}")
     logger.info("📨 Waiting for messages...")
     logger.info("💡 Send /start to your bot on Telegram")
     logger.info("="*50)

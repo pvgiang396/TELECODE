@@ -46,9 +46,16 @@ ask_value() {
 # ask_choice <mô tả trạng thái hiện tại> -> in ra "keep" hoặc "redo"
 # Menu radio 2 dòng chọn bằng phím mũi tên (↑/↓ + Enter), mặc định "Giữ nguyên".
 # Fallback về nhập số 1/2 nếu không có TTY thật (vd chạy trong CI/pipe không gắn terminal).
+#
+# QUAN TRỌNG: hàm này luôn được gọi qua "$(ask_choice ...)" để lấy kết quả trả về
+# ("keep"/"redo") -> command substitution chụp TOÀN BỘ stdout của hàm vào biến, kể
+# cả những echo chỉ nhằm hiển thị menu. Vì vậy mọi thứ hiển thị cho người dùng thấy
+# (mô tả, 2 dòng radio, con trỏ) phải ghi thẳng ra /dev/tty — CHỈ dòng "keep"/"redo"
+# cuối cùng mới được echo ra stdout thật. Quên tách 2 kênh này là màn hình trắng,
+# script treo im lặng chờ phím mà người dùng không biết phải bấm gì.
 ask_choice() {
     local desc="$1" choice
-    echo "$desc"
+    echo "$desc" > /dev/tty
 
     if [ ! -r /dev/tty ]; then
         read -rp "  1) Giữ nguyên   2) Cài lại/khởi động lại  [mặc định 1]: " choice
@@ -58,15 +65,19 @@ ask_choice() {
     fi
 
     local opts=("Giữ nguyên" "Cài lại / khởi động lại") sel=0 i key rest
-    tput civis 2>/dev/null
-    for i in "${!opts[@]}"; do echo "  ○ ${opts[$i]}"; done
+    {
+        tput civis 2>/dev/null
+        for i in "${!opts[@]}"; do echo "  ○ ${opts[$i]}"; done
+    } > /dev/tty
     while true; do
         # Vẽ lại 2 dòng: đưa con trỏ lên đầu danh sách rồi in lại có đánh dấu ●
-        tput cuu "${#opts[@]}" 2>/dev/null
-        for i in "${!opts[@]}"; do
-            tput el 2>/dev/null
-            if [ "$i" -eq "$sel" ]; then echo "  ${GREEN}●${NC} ${opts[$i]}"; else echo "  ○ ${opts[$i]}"; fi
-        done
+        {
+            tput cuu "${#opts[@]}" 2>/dev/null
+            for i in "${!opts[@]}"; do
+                tput el 2>/dev/null
+                if [ "$i" -eq "$sel" ]; then echo -e "  ${GREEN}●${NC} ${opts[$i]}"; else echo "  ○ ${opts[$i]}"; fi
+            done
+        } > /dev/tty
         IFS= read -rsn1 key < /dev/tty
         if [ "$key" = $'\x1b' ]; then
             read -rsn2 -t 0.01 rest < /dev/tty
@@ -79,7 +90,7 @@ ask_choice() {
             break # Enter
         fi
     done
-    tput cnorm 2>/dev/null
+    tput cnorm > /dev/tty 2>/dev/null
     [ "$sel" -eq 1 ] && echo "redo" || echo "keep"
 }
 
@@ -139,9 +150,13 @@ patch_code_server_login() {
     root="$(find_code_server_root)" || { warn "Không tìm thấy thư mục cài code-server để thêm icon hiện mật khẩu, bỏ qua."; return; }
     html="$root/src/browser/pages/login.html"
     css="$root/src/browser/pages/login.css"
-    grep -q "telecode-eye-toggle" "$html" 2>/dev/null && return
+    # HTML và CSS được idempotent-check ĐỘC LẬP nhau bên trong Python (không gate
+    # chung 1 marker ở bash) — máy đã patch HTML từ bản cũ (thiếu fix specificity
+    # CSS) vẫn phải được vá lại phần CSS khi chạy setup.sh bản mới, dù HTML không
+    # cần đổi gì thêm.
+    grep -q "telecode-eye-toggle" "$html" 2>/dev/null && grep -q "telecode-eye-toggle-css-v2" "$css" 2>/dev/null && return
 
-    info "1b) Thêm icon hiện/ẩn mật khẩu vào trang đăng nhập code-server..."
+    info "1b) Thêm/cập nhật icon hiện/ẩn mật khẩu vào trang đăng nhập code-server..."
     local SUDO=""
     [ -w "$html" ] || SUDO="sudo"
     $SUDO python3 - "$html" "$css" <<'PYEOF'
@@ -185,20 +200,44 @@ new = '''            <!-- telecode-eye-toggle -->
 if old in html:
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html.replace(old, new))
+    print("html: da vao lan dau")
+elif "telecode-eye-toggle" in html:
+    print("html: da vao tu truoc, bo qua")
 else:
     print("WARN: khong tim thay khoi HTML mat khau de patch (co the code-server da doi cau truc)")
-    sys.exit(0)
 
-css_addition = """
+with open(css_path, "r", encoding="utf-8") as f:
+    css = f.read()
 
-/* telecode-eye-toggle */
+if "telecode-eye-toggle-css-v2" in css:
+    print("css: da vao (v2), bo qua")
+else:
+    # Input khong con la con truc tiep cua .field sau khi boc them .password-wrap
+    # -> selector goc dung child combinator (>) khong khop nua, input mat toan bo
+    # style (padding 16px, border, background...) va tro thanh textbox mac dinh.
+    # Doi sang descendant combinator (space) de van khop bat ke do sau nesting.
+    css = css.replace(
+        ".login-form > .field > .password {",
+        ".login-form > .field .password {",
+    ).replace(
+        ".login-form > .field > .password::placeholder {",
+        ".login-form > .field .password::placeholder {",
+    ).replace(
+        ".login-form > .field > .password:focus {",
+        ".login-form > .field .password:focus {",
+    )
+
+    css_addition = """
+
+/* telecode-eye-toggle-css-v2 */
 .password-wrap {
   position: relative;
   flex: 1;
   display: flex;
 }
-.password-wrap > .password {
-  flex: 1;
+/* selector dai hon (4 class) de chac chan thang specificity so voi rule goc
+   ".login-form > .field .password" (3 class) o tren, khong phu thuoc thu tu file */
+.login-form > .field .password-wrap > .password {
   padding-right: 40px;
 }
 .password-wrap > .toggle-password {
@@ -214,8 +253,9 @@ css_addition = """
   padding: 4px;
 }
 """
-with open(css_path, "a", encoding="utf-8") as f:
-    f.write(css_addition)
+    with open(css_path, "w", encoding="utf-8") as f:
+        f.write(css + css_addition)
+    print("css: da vao/cap nhat")
 PYEOF
     if grep -q "telecode-eye-toggle" "$html" 2>/dev/null; then
         ok "Đã thêm icon hiện/ẩn mật khẩu vào trang login code-server"
@@ -311,52 +351,26 @@ VSCODE_PUBLIC_URL="$(wait_for_url "$T1_LOG")" || { err "Không lấy được UR
 ok "VS Code tunnel: $VSCODE_PUBLIC_URL"
 echo ""
 
-# --- 6. Tunnel cho mini_app.html -------------------------------------------
-STATIC_PID="$RUN_DIR/static-server.pid"
-if ! is_alive "$STATIC_PID"; then
-    (cd "$DIR" && nohup python3 -m http.server 8000 > "$LOG_DIR/static-server.log" 2>&1 & echo $! > "$STATIC_PID")
-    sleep 1
-fi
-
-T2_PID="$RUN_DIR/tunnel-miniapp.pid"
-T2_LOG="$LOG_DIR/tunnel-miniapp.log"
-if is_alive "$T2_PID" && [ -n "$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$T2_LOG" 2>/dev/null | head -n1)" ]; then
-    if [ "$(ask_choice "6) Tunnel mini_app.html: đang chạy ($(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' "$T2_LOG" | head -n1))")" = "redo" ]; then
-        stop_pid "$T2_PID"; > "$T2_LOG"
-    fi
-fi
-if ! is_alive "$T2_PID"; then
-    info "Đang mở tunnel cho mini_app.html..."
-    nohup cloudflared tunnel --url http://localhost:8000 > "$T2_LOG" 2>&1 &
-    echo $! > "$T2_PID"
-fi
-MINIAPP_HOST_URL="$(wait_for_url "$T2_LOG")" || { err "Không lấy được URL tunnel mini_app.html, xem $T2_LOG"; exit 1; }
-MINI_APP_URL="$MINIAPP_HOST_URL/mini_app.html"
-ok "Mini App tunnel: $MINI_APP_URL"
-echo ""
-
-# --- 7. Ghi VSCODE_PUBLIC_URL vào mini_app.html -----------------------------
-sed -i.bak -E "s#VSCODE_PUBLIC_URL: '[^']*'#VSCODE_PUBLIC_URL: '$VSCODE_PUBLIC_URL'#" "$DIR/mini_app.html"
-rm -f "$DIR/mini_app.html.bak"
-ok "Đã cập nhật VSCODE_PUBLIC_URL trong mini_app.html"
-echo ""
-
-# --- 8. Telegram Bot Token ---------------------------------------------------
+# --- 6. Telegram Bot Token ---------------------------------------------------
+# Nút bot mở THẲNG VSCODE_PUBLIC_URL (không qua iframe mini_app.html): code-server
+# đặt cookie SameSite=Lax, load trong iframe khác domain sẽ bị nhiều WebView (đặc
+# biệt iOS WKWebView của Telegram) chặn làm cookie bên thứ 3 -> đăng nhập đúng mật
+# khẩu vẫn quay lại y hệt màn login. mini_app.html vẫn còn trong repo nhưng không
+# dùng trong luồng mặc định nữa.
 CONFIG_FILE="$DIR/config.yaml"
 [ -f "$CONFIG_FILE" ] || cp "$DIR/config.example.yaml" "$CONFIG_FILE"
 CURRENT_TOKEN="$(grep '^TELEGRAM_BOT_TOKEN:' "$CONFIG_FILE" | sed -E 's/^TELEGRAM_BOT_TOKEN: *"?([^"]*)"?/\1/')"
 [ "$CURRENT_TOKEN" = "YOUR_BOT_TOKEN_HERE" ] && CURRENT_TOKEN=""
-echo "8) Token bot Telegram — lấy từ @BotFather (gửi /newbot trên điện thoại nếu chưa có)."
+echo "6) Token bot Telegram — lấy từ @BotFather (gửi /newbot trên điện thoại nếu chưa có)."
 BOT_TOKEN="$(ask_value "   Token" "$CURRENT_TOKEN" 1)"
 echo ""
 
-# --- 9. Ghi config.yaml -------------------------------------------------------
+# --- 7. Ghi config.yaml -------------------------------------------------------
 cat > "$CONFIG_FILE" <<EOF
 TELEGRAM_BOT_TOKEN: "$BOT_TOKEN"
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "$CS_PASSWORD"
 VSCODE_PUBLIC_URL: "$VSCODE_PUBLIC_URL"
-MINI_APP_URL: "$MINI_APP_URL"
 BOT_POLLING_INTERVAL: 30
 BOT_TIMEOUT: 30
 VSCODE_AUTH_REQUIRED: true
@@ -368,9 +382,9 @@ EOF
 ok "Đã ghi $CONFIG_FILE"
 echo ""
 
-# --- 10. Python venv + dependencies -------------------------------------------
+# --- 8. Python venv + dependencies -------------------------------------------
 if [ ! -d "$DIR/venv" ]; then
-    info "10) Tạo virtualenv..."
+    info "8) Tạo virtualenv..."
     python3 -m venv "$DIR/venv"
 fi
 VENV_PY="$DIR/venv/bin/python3"
@@ -391,10 +405,10 @@ fi
 ok "Dependencies Python sẵn sàng"
 echo ""
 
-# --- 11. Chạy bot ----------------------------------------------------------------
+# --- 9. Chạy bot ----------------------------------------------------------------
 BOT_PID="$RUN_DIR/bot.pid"
 if is_alive "$BOT_PID"; then
-    if [ "$(ask_choice "11) Bot: đang chạy (PID $(cat "$BOT_PID"))")" = "redo" ]; then
+    if [ "$(ask_choice "9) Bot: đang chạy (PID $(cat "$BOT_PID"))")" = "redo" ]; then
         stop_pid "$BOT_PID"
     fi
 fi
@@ -414,8 +428,7 @@ ok "Setup xong!"
 echo "======================================"
 echo ""
 echo "📱 Trên điện thoại: mở Telegram → tìm bot của bạn → /start → bấm '🔧 Open VS Code'"
-echo "🔗 VS Code URL : $VSCODE_PUBLIC_URL"
-echo "🔗 Mini App URL: $MINI_APP_URL"
+echo "🔗 VS Code URL: $VSCODE_PUBLIC_URL"
 echo "📄 Log: $LOG_DIR/"
 echo ""
 echo "Chạy lại 'bash setup.sh' bất cứ lúc nào — script sẽ hỏi giữ nguyên hay khởi động lại từng phần."
