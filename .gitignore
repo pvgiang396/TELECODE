@@ -1,0 +1,103 @@
+# Environment & Config
+.env
+.env.local
+.env.*.local
+config.yaml
+config.local.yaml
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+ENV/
+env/
+.venv
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Node (if used)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+tunnel.log
+
+# Workspace & Data
+workspace/
+code-server-data/
+code-server-config/
+
+# Temporary
+.tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+.directory
+
+# Git
+.git/
+.gitkeep
+
+# Credentials & Secrets
+.auth
+.token
+secrets/
+credentials.json
+
+# Virtual environments
+venv*/
+.venv*/
+env*/
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/

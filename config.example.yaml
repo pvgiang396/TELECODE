@@ -1,0 +1,44 @@
+# Telegram VS Code Mini App - Configuration
+# Copy this file to config.yaml and update values
+
+# Telegram Bot Token
+# Get from @BotFather on Telegram
+TELEGRAM_BOT_TOKEN: "YOUR_BOT_TOKEN_HERE"
+
+# VS Code Server Configuration
+VSCODE_PORT: 8443
+VSCODE_PASSWORD: "your-secure-password"
+
+# Public URL for VS Code Server
+# This is the URL that Telegram users will access
+# Get this from Cloudflare Tunnel or Ngrok after running it
+VSCODE_PUBLIC_URL: "https://your-tunnel-name.trycloudflare.com"
+
+# Mini App Configuration
+# Where the mini_app.html is hosted
+# For testing locally: http://localhost:8000/mini_app.html
+# For production: https://your-domain.com/mini_app.html
+MINI_APP_URL: "https://your-domain.com/mini_app.html"
+
+# Bot Configuration
+BOT_POLLING_INTERVAL: 30  # Seconds between polling updates
+BOT_TIMEOUT: 30           # Request timeout in seconds
+
+# VS Code Server Settings
+VSCODE_AUTH_REQUIRED: true
+VSCODE_ALLOW_INSECURE: false
+
+# Logging
+LOG_LEVEL: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# Advanced
+ENABLE_DEBUG_MODE: false
+ALLOW_MULTIPLE_CONNECTIONS: false
+
+# Notes:
+# 1. Generate BOT_TOKEN at https://t.me/BotFather
+# 2. Get VSCODE_PUBLIC_URL from Cloudflare Tunnel:
+#    ./cloudflared tunnel --url http://localhost:8443
+# 3. For production, use a real domain and HTTPS only
+# 4. Keep VSCODE_PASSWORD strong (min 12 characters)
+# 5. Keep BOT_TOKEN secret - never commit it to git
