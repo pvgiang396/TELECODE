@@ -66,6 +66,8 @@ bash setup.sh
 
 `setup.sh` tự tạo 1 shortcut trên Desktop ("VS Code (code-server)", dùng icon riêng `assets/icon.png`) mở thẳng `http://localhost:8443` — nhanh hơn nhiều so với qua Telegram/tunnel vì không qua Cloudflare. Đây là **cùng 1 phiên làm việc** với bản mở từ điện thoại (cùng file, cùng extension host) — mở song song ở cả 2 nơi vẫn an toàn.
 
+`setup.sh` cũng tự thay favicon/PWA icon của code-server bằng icon riêng — icon hiện trên **taskbar** khi mở qua Chrome `--app=` lấy từ favicon của trang, không phải từ `Icon=` trong file shortcut. Nếu taskbar vẫn hiện icon cũ, thử mở lại cửa sổ app-mode hoặc xoá site data của Chrome cho `localhost:8443` (Chrome cache icon theo origin).
+
 Nếu máy có Chrome/Edge/Chromium, shortcut mở bằng chế độ `--app=` — ẩn thanh địa chỉ/tab, trông như 1 app desktop thật thay vì tab trình duyệt. Không có trình duyệt nào trong nhóm đó thì tự fallback về mở tab thường.
 
 ## 🐳 Cách chạy với Docker (thay thế setup.sh)

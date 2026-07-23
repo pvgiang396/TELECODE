@@ -347,6 +347,36 @@ PYEOF
 patch_code_server_login
 echo ""
 
+# --- 1c. Đổi icon favicon/PWA của code-server sang icon riêng ---------------
+# Chrome (mở qua --app=) lấy icon hiển thị trên taskbar từ favicon/pwa-icon của
+# trang, không phải từ Icon= trong .desktop (cái đó chỉ ảnh hưởng icon launcher).
+# Ghi đè thẳng file ảnh (không patch HTML) — không đụng đến workbench.html/login.html.
+patch_code_server_favicon() {
+    local root media
+    root="$(find_code_server_root)" || return
+    media="$root/src/browser/media"
+    [ -d "$media" ] || return
+
+    local SUDO=""
+    [ -w "$media/favicon.ico" ] || SUDO="sudo"
+
+    # So sánh nội dung trước, khớp rồi thì bỏ qua (không cần sudo mỗi lần chạy lại)
+    if cmp -s "$DIR/assets/icon.ico" "$media/favicon.ico" 2>/dev/null; then
+        return
+    fi
+
+    info "1c) Đổi icon favicon/PWA của code-server sang icon riêng..."
+    $SUDO cp "$DIR/assets/icon.ico" "$media/favicon.ico"
+    $SUDO cp "$DIR/assets/favicon.svg" "$media/favicon-dark-support.svg"
+    $SUDO cp "$DIR/assets/pwa-icon-192.png" "$media/pwa-icon-192.png"
+    $SUDO cp "$DIR/assets/pwa-icon-512.png" "$media/pwa-icon-512.png"
+    [ -f "$media/pwa-icon-maskable-192.png" ] && $SUDO cp "$DIR/assets/pwa-icon-192.png" "$media/pwa-icon-maskable-192.png"
+    [ -f "$media/pwa-icon-maskable-512.png" ] && $SUDO cp "$DIR/assets/pwa-icon-512.png" "$media/pwa-icon-maskable-512.png"
+    ok "Đã đổi icon favicon/PWA — nếu Chrome vẫn hiện icon cũ trên taskbar, đó là do cache icon của Chrome cho origin này, thử mở lại cửa sổ app-mode hoặc xoá site data."
+}
+patch_code_server_favicon
+echo ""
+
 # --- 2. Password code-server ---------------------------------------------
 CS_CONFIG="$HOME/.config/code-server/config.yaml"
 mkdir -p "$(dirname "$CS_CONFIG")"
