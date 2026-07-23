@@ -165,8 +165,7 @@ echo ""
 # --- 6. Tunnel cho mini_app.html -------------------------------------------
 STATIC_PID="$RUN_DIR/static-server.pid"
 if ! is_alive "$STATIC_PID"; then
-    (cd "$DIR" && nohup python3 -m http.server 8000 > "$LOG_DIR/static-server.log" 2>&1 &)
-    echo $(pgrep -f "http.server 8000" | tail -n1) > "$STATIC_PID"
+    (cd "$DIR" && nohup python3 -m http.server 8000 > "$LOG_DIR/static-server.log" 2>&1 & echo $! > "$STATIC_PID")
     sleep 1
 fi
 
@@ -225,10 +224,21 @@ if [ ! -d "$DIR/venv" ]; then
     info "10) Tạo virtualenv..."
     python3 -m venv "$DIR/venv"
 fi
-# shellcheck disable=SC1091
-source "$DIR/venv/bin/activate"
-pip install --upgrade pip -q
-pip install -r "$DIR/requirements.txt" -q
+VENV_PY="$DIR/venv/bin/python3"
+if ! "$VENV_PY" -m pip --version &>/dev/null; then
+    # Một số bản Linux (Debian/Ubuntu) tách ensurepip ra khỏi python3 mặc định
+    # -> venv tạo ra không có pip, cài dependency thất bại âm thầm. Bootstrap
+    # bằng get-pip.py thay vì dựa vào ensurepip/apt (không cần sudo).
+    warn "venv thiếu pip, đang bootstrap qua get-pip.py..."
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$RUN_DIR/get-pip.py"
+    "$VENV_PY" "$RUN_DIR/get-pip.py" -q
+fi
+"$VENV_PY" -m pip install --upgrade pip -q
+"$VENV_PY" -m pip install -r "$DIR/requirements.txt" -q
+if ! "$VENV_PY" -c "import yaml, telegram, dotenv" &>/dev/null; then
+    err "Cài dependency Python thất bại — kiểm tra $LOG_DIR hoặc chạy tay: $VENV_PY -m pip install -r requirements.txt"
+    exit 1
+fi
 ok "Dependencies Python sẵn sàng"
 echo ""
 
@@ -240,9 +250,12 @@ if is_alive "$BOT_PID"; then
     fi
 fi
 if ! is_alive "$BOT_PID"; then
-    (cd "$DIR" && nohup "$DIR/venv/bin/python3" bot.py > "$LOG_DIR/bot.log" 2>&1 &)
+    (cd "$DIR" && nohup "$VENV_PY" bot.py > "$LOG_DIR/bot.log" 2>&1 & echo $! > "$BOT_PID")
     sleep 1
-    echo "$(pgrep -f "$DIR/venv/bin/python3 bot.py" | tail -n1)" > "$BOT_PID"
+    if ! is_alive "$BOT_PID"; then
+        err "Bot khởi động rồi thoát ngay — xem log: $LOG_DIR/bot.log"
+        exit 1
+    fi
 fi
 ok "Bot đang chạy (PID $(cat "$BOT_PID"))"
 echo ""
