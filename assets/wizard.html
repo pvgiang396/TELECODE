@@ -177,7 +177,11 @@ fetch('/api/status').then(r => r.json()).then(s => {
       .then(r => r.json())
       .then(() => {
         msg.className = 'ok';
-        msg.textContent = '✅ Đã lưu! Cài đặt đang tiếp tục ở nền — terminal sẽ tự đóng khi xong, bạn có thể đóng tab này.';
+        msg.textContent = '✅ Đã lưu! Cài đặt đang tiếp tục ở nền — cửa sổ này và terminal sẽ tự đóng khi xong.';
+        // Đóng cửa sổ này sau khi lưu xong — chỉ hoạt động nếu trình duyệt cho phép
+        // script tự đóng cửa sổ --app= (thường được vì không phải tab thường); nếu
+        // trình duyệt chặn thì người dùng vẫn thấy thông báo trên để tự đóng tay.
+        setTimeout(() => window.close(), 1500);
       })
       .catch(() => {
         msg.className = 'err';

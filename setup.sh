@@ -190,12 +190,16 @@ fi
 ok "code-server sẵn sàng: $(command -v code-server)"
 echo ""
 
-# --- 1b. Patch trang login code-server: thêm icon hiện/ẩn mật khẩu ---------
-# code-server không có tuỳ chọn chính thức để tuỳ biến trang login -> vá thẳng
-# file HTML/CSS đóng gói sẵn (login.js đọc lại các file này ở MỖI request, không
-# cache, nên áp dụng ngay, không cần restart). Nhược điểm: bị ghi đè mỗi khi
-# code-server cài lại/nâng cấp -> gọi hàm này lại mỗi lần chạy setup.sh (idempotent
-# qua marker "telecode-eye-toggle").
+# --- 1b/1c. Patch code-server: icon hiện/ẩn mật khẩu + favicon/PWA riêng ----
+# code-server không có tuỳ chọn chính thức để tuỳ biến trang login/favicon -> vá
+# thẳng file đóng gói sẵn (login.js đọc lại HTML/CSS ở MỖI request, không cache,
+# nên áp dụng ngay, không cần restart). Nhược điểm: bị ghi đè mỗi khi code-server
+# cài lại/nâng cấp -> gọi hàm này lại mỗi lần chạy setup.sh (idempotent qua marker).
+#
+# GỘP CHUNG login.html/css + favicon vào 1 LỆNH SUDO DUY NHẤT: chạy nền qua nohup
+# (không có TTY thật) khiến sudo không cache được xác thực giữa các lần gọi riêng
+# lẻ — tách 2 hàm/2 lệnh sudo sẽ hỏi lại mật khẩu lần nữa (đã gặp thật: 2 lần hỏi
+# dù mỗi hàm tự nó chỉ 1 lệnh). Gộp thành 1 lệnh = chỉ hỏi sudo đúng 1 lần.
 find_code_server_root() {
     local bin resolved dir
     bin="$(command -v code-server)" || return 1
@@ -211,24 +215,30 @@ find_code_server_root() {
     return 1
 }
 
-patch_code_server_login() {
-    local root html css
-    root="$(find_code_server_root)" || { warn "Không tìm thấy thư mục cài code-server để thêm icon hiện mật khẩu, bỏ qua."; return; }
+patch_code_server_assets() {
+    local root html css media
+    root="$(find_code_server_root)" || { warn "Không tìm thấy thư mục cài code-server để patch icon/favicon, bỏ qua."; return; }
     html="$root/src/browser/pages/login.html"
     css="$root/src/browser/pages/login.css"
-    # HTML và CSS được idempotent-check ĐỘC LẬP nhau bên trong Python (không gate
-    # chung 1 marker ở bash) — máy đã patch HTML từ bản cũ (thiếu fix specificity
-    # CSS) vẫn phải được vá lại phần CSS khi chạy setup.sh bản mới, dù HTML không
-    # cần đổi gì thêm.
-    grep -q "telecode-eye-toggle" "$html" 2>/dev/null && grep -q "telecode-anti-inspect" "$html" 2>/dev/null && grep -q "telecode-eye-toggle-css-v2" "$css" 2>/dev/null && return
+    media="$root/src/browser/media"
 
-    info "1b) Thêm/cập nhật icon hiện/ẩn mật khẩu vào trang đăng nhập code-server..."
+    # 3 điều kiện đều đã đạt (idempotent riêng từng phần) -> không cần sudo gì cả.
+    local login_ok=0 css_ok=0 favicon_ok=0
+    grep -q "telecode-eye-toggle" "$html" 2>/dev/null && grep -q "telecode-anti-inspect" "$html" 2>/dev/null && login_ok=1
+    grep -q "telecode-eye-toggle-css-v2" "$css" 2>/dev/null && css_ok=1
+    cmp -s "$DIR/assets/icon.ico" "$media/favicon.ico" 2>/dev/null && favicon_ok=1
+    if [ "$login_ok" = 1 ] && [ "$css_ok" = 1 ] && [ "$favicon_ok" = 1 ]; then
+        return
+    fi
+
+    info "1b/1c) Cập nhật icon con mắt/chặn F12/favicon của code-server..."
     local SUDO=""
     [ -w "$html" ] || SUDO="sudo"
-    $SUDO python3 - "$html" "$css" <<'PYEOF'
+    $SUDO python3 - "$html" "$css" "$media" "$DIR/assets" <<'PYEOF'
+import shutil
 import sys
 
-html_path, css_path = sys.argv[1], sys.argv[2]
+html_path, css_path, media_dir, assets_dir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 with open(html_path, "r", encoding="utf-8") as f:
     html = f.read()
@@ -341,51 +351,40 @@ else:
     with open(css_path, "w", encoding="utf-8") as f:
         f.write(css + css_addition)
     print("css: da vao/cap nhat")
+
+# --- Favicon/PWA icon riêng: Chrome (--app=) lấy icon taskbar từ đây, không
+# phải Icon= trong .desktop (cái đó chỉ ảnh hưởng icon launcher trước khi chạy).
+icon_ico = f"{assets_dir}/icon.ico"
+if not shutil.os.path.exists(media_dir):
+    print("WARN: khong tim thay thu muc media de doi favicon")
+else:
+    favicon_ico = f"{media_dir}/favicon.ico"
+    needs_favicon = True
+    try:
+        with open(icon_ico, "rb") as a, open(favicon_ico, "rb") as b:
+            needs_favicon = a.read() != b.read()
+    except FileNotFoundError:
+        needs_favicon = True
+    if needs_favicon:
+        shutil.copy(icon_ico, favicon_ico)
+        shutil.copy(f"{assets_dir}/favicon.svg", f"{media_dir}/favicon-dark-support.svg")
+        shutil.copy(f"{assets_dir}/pwa-icon-192.png", f"{media_dir}/pwa-icon-192.png")
+        shutil.copy(f"{assets_dir}/pwa-icon-512.png", f"{media_dir}/pwa-icon-512.png")
+        for name, src in (("pwa-icon-maskable-192.png", "pwa-icon-192.png"), ("pwa-icon-maskable-512.png", "pwa-icon-512.png")):
+            dst = f"{media_dir}/{name}"
+            if shutil.os.path.exists(dst):
+                shutil.copy(f"{assets_dir}/{src}", dst)
+        print("favicon: da doi")
+    else:
+        print("favicon: da khop, bo qua")
 PYEOF
     if grep -q "telecode-eye-toggle" "$html" 2>/dev/null; then
-        ok "Đã thêm icon hiện/ẩn mật khẩu vào trang login code-server"
+        ok "Đã cập nhật icon con mắt/chặn F12/favicon của code-server"
     else
         warn "Không patch được trang login (có thể phiên bản code-server đã đổi cấu trúc HTML) — bỏ qua, không chặn setup"
     fi
 }
-patch_code_server_login
-echo ""
-
-# --- 1c. Đổi icon favicon/PWA của code-server sang icon riêng ---------------
-# Chrome (mở qua --app=) lấy icon hiển thị trên taskbar từ favicon/pwa-icon của
-# trang, không phải từ Icon= trong .desktop (cái đó chỉ ảnh hưởng icon launcher).
-# Ghi đè thẳng file ảnh (không patch HTML) — không đụng đến workbench.html/login.html.
-patch_code_server_favicon() {
-    local root media
-    root="$(find_code_server_root)" || return
-    media="$root/src/browser/media"
-    [ -d "$media" ] || return
-
-    local SUDO=""
-    [ -w "$media/favicon.ico" ] || SUDO="sudo"
-
-    # So sánh nội dung trước, khớp rồi thì bỏ qua (không cần sudo mỗi lần chạy lại)
-    if cmp -s "$DIR/assets/icon.ico" "$media/favicon.ico" 2>/dev/null; then
-        return
-    fi
-
-    info "1c) Đổi icon favicon/PWA của code-server sang icon riêng..."
-    # Gộp hết các lệnh cp cần quyền root vào 1 lệnh sudo DUY NHẤT — chạy nền (không
-    # TTY thật) khiến sudo không cache được thông tin xác thực giữa các lần gọi
-    # riêng lẻ, mỗi `$SUDO cp` tách rời sẽ hỏi lại mật khẩu (đã gặp thật, user phải
-    # gõ sudo password 6 lần liên tiếp).
-    $SUDO bash -c "
-        cp '$DIR/assets/icon.ico' '$media/favicon.ico'
-        cp '$DIR/assets/favicon.svg' '$media/favicon-dark-support.svg'
-        cp '$DIR/assets/pwa-icon-192.png' '$media/pwa-icon-192.png'
-        cp '$DIR/assets/pwa-icon-512.png' '$media/pwa-icon-512.png'
-        [ -f '$media/pwa-icon-maskable-192.png' ] && cp '$DIR/assets/pwa-icon-192.png' '$media/pwa-icon-maskable-192.png'
-        [ -f '$media/pwa-icon-maskable-512.png' ] && cp '$DIR/assets/pwa-icon-512.png' '$media/pwa-icon-maskable-512.png'
-        true
-    "
-    ok "Đã đổi icon favicon/PWA — nếu Chrome vẫn hiện icon cũ trên taskbar, đó là do cache icon của Chrome cho origin này, thử mở lại cửa sổ app-mode hoặc xoá site data."
-}
-patch_code_server_favicon
+patch_code_server_assets
 echo ""
 
 # --- 1d. Đảm bảo settings.json có baseline hợp lý ----------------------------
@@ -669,11 +668,20 @@ fi
 ok "Bot đang chạy (PID $(cat "$BOT_PID"))"
 echo ""
 
-# --- 10. Tự đóng terminal (chỉ khi cài qua wizard web) -----------------------
-# $PPID lúc mở wizard đã được lưu vào wizard-answers.json — cài xong hết thì kill
-# PID đó để đóng shell/terminal, không cần user tự đóng. Đặt SAU CÙNG (mọi bước
-# cài đặt/khởi động đã xong) để không có gì phụ thuộc chạy tiếp sau khi terminal mất.
+# --- 10. Mở app Telecode + tự đóng terminal (chỉ khi cài qua wizard web) ----
+# Cài xong thì tự mở luôn app Telecode (giống bấm shortcut Desktop) rồi mới kill
+# $PPID (đã lưu lúc mở wizard) để đóng shell/terminal — thứ tự: mở app TRƯỚC,
+# đóng terminal SAU CÙNG (mọi bước cài đặt/khởi động đã xong, không gì phụ thuộc
+# chạy tiếp sau khi terminal mất).
 if [ "${TELECODE_APPLYING:-0}" = "1" ] && [ -f "$ANSWERS_FILE" ]; then
+    APP_BROWSER="$(resolve_app_mode_browser_bin || true)"
+    if [ -n "$APP_BROWSER" ]; then
+        nohup "$APP_BROWSER" --app=http://localhost:8443 >/dev/null 2>&1 &
+    else
+        nohup xdg-open http://localhost:8443 >/dev/null 2>&1 &
+    fi
+    disown
+
     CALLER_PID="$(answers_get "_callerPid")"
     if [ -n "$CALLER_PID" ] && kill -0 "$CALLER_PID" 2>/dev/null; then
         kill "$CALLER_PID" 2>/dev/null
