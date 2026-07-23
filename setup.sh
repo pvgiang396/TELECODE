@@ -428,6 +428,40 @@ else:
 ensure_code_server_user_settings
 echo ""
 
+# --- 1e. GitHub Copilot + Copilot Chat --------------------------------------
+# code-server dùng Open VSX làm marketplace mặc định, nhưng GitHub chỉ publish
+# Copilot/Copilot Chat lên Visual Studio Marketplace chính thức (không có trên
+# Open VSX) -> không cài được qua UI Extensions bình thường. Tải thẳng .vsix từ
+# API Marketplace rồi sideload bằng `code-server --install-extension`. Cài luôn
+# mặc định (không hỏi) cho mọi máy, kể cả người dùng chưa có quota Copilot —
+# đăng nhập là bước riêng của người dùng sau này (Command Palette > "GitHub
+# Copilot: Sign In"), không đăng nhập được thì extension chỉ nằm im, không lỗi.
+install_vsix_extension() { # install_vsix_extension <publisher> <name>
+    local publisher="$1" name="$2" vsix="$RUN_DIR/${name}.vsix"
+    if ! curl -fsSL -o "$vsix" \
+        "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/${publisher}/vsextensions/${name}/latest/vspackage"; then
+        warn "   Tải ${publisher}.${name} thất bại (kiểm tra mạng) — bỏ qua, chạy lại setup.sh sau để thử lại."
+        return 1
+    fi
+    code-server --install-extension "$vsix" --force >/dev/null 2>&1
+    rm -f "$vsix"
+    ok "   Đã cài ${publisher}.${name}"
+}
+
+INSTALLED_EXT="$(code-server --list-extensions 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+if echo "$INSTALLED_EXT" | grep -q '^github\.copilot$' && echo "$INSTALLED_EXT" | grep -q '^github\.copilot-chat$'; then
+    if [ "$(ask_choice "1e) GitHub Copilot + Copilot Chat: đã cài" "copilotExtAction")" = "redo" ]; then
+        install_vsix_extension "GitHub" "copilot"
+        install_vsix_extension "GitHub" "copilot-chat"
+    fi
+else
+    info "1e) Đang cài GitHub Copilot + Copilot Chat..."
+    echo "$INSTALLED_EXT" | grep -q '^github\.copilot$' || install_vsix_extension "GitHub" "copilot"
+    echo "$INSTALLED_EXT" | grep -q '^github\.copilot-chat$' || install_vsix_extension "GitHub" "copilot-chat"
+    info "   Đăng nhập sau tại: Command Palette > \"GitHub Copilot: Sign In\" (dùng account có quota công ty cấp)."
+fi
+echo ""
+
 # --- 2. Password code-server ---------------------------------------------
 CS_CONFIG="$HOME/.config/code-server/config.yaml"
 mkdir -p "$(dirname "$CS_CONFIG")"
