@@ -377,6 +377,47 @@ patch_code_server_favicon() {
 patch_code_server_favicon
 echo ""
 
+# --- 1d. Đảm bảo settings.json có baseline hợp lý ----------------------------
+# security.workspace.trust.enabled=false: tắt hẳn Workspace Trust. Không phải
+# workspace lạ cần "tin cậy" — đây là máy/project của chính người dùng. Trạng thái
+# trust (và cả enable/disable extension theo workspace) trong code-server web
+# workbench được lưu ở phía trình duyệt (IndexedDB theo origin), không phải file
+# trên server — nếu không ổn định (đổi origin, xoá site data...) thì Workspace
+# Trust bật lên sẽ khiến các extension như Claude Code bị vô hiệu hoá lại mỗi lần
+# mở, phải bấm "Enable (Workspace)" thủ công liên tục. Chỉ THÊM key còn thiếu,
+# không ghi đè giá trị người dùng đã tự chỉnh trong settings.json.
+ensure_code_server_user_settings() {
+    local settings="$HOME/.local/share/code-server/User/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [ -f "$settings" ] || echo '{}' > "$settings"
+    python3 -c "
+import json
+
+path = '$settings'
+with open(path) as f:
+    settings = json.load(f)
+
+defaults = {
+    'security.workspace.trust.enabled': False,
+    'workbench.startupEditor': 'none',
+}
+changed = False
+for k, v in defaults.items():
+    if k not in settings:
+        settings[k] = v
+        changed = True
+
+if changed:
+    with open(path, 'w') as f:
+        json.dump(settings, f, indent='\t')
+    print('settings.json: da them key con thieu')
+else:
+    print('settings.json: da du, bo qua')
+"
+}
+ensure_code_server_user_settings
+echo ""
+
 # --- 2. Password code-server ---------------------------------------------
 CS_CONFIG="$HOME/.config/code-server/config.yaml"
 mkdir -p "$(dirname "$CS_CONFIG")"
