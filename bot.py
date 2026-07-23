@@ -8,7 +8,7 @@ import os
 import logging
 import yaml
 from pathlib import Path
-from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, WebAppInfo, MenuButtonWebApp
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Configure logging
@@ -67,30 +67,13 @@ logger.info(f"   Bot Token: {TELEGRAM_BOT_TOKEN[:10]}...")
 logger.info(f"   VS Code URL: {VSCODE_PUBLIC_URL}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Start command handler
-    Sends a message with a Web App button to open VS Code
-    """
+    """Start command handler — nút mở VS Code nằm ở menu button cạnh khung nhập tin nhắn (xem post_init)."""
     user = update.message.from_user
     logger.info(f"👤 User started bot: {user.first_name} (@{user.username})")
-    
-    # Mở thẳng URL code-server (không qua iframe mini_app.html): code-server đặt
-    # cookie SameSite=Lax, nếu load trong iframe khác domain (mini_app.html) thì
-    # nhiều WebView (đặc biệt iOS WKWebView dùng bởi Telegram) coi đây là cookie
-    # bên thứ 3 và chặn lưu -> đăng nhập luôn báo lại y hệt màn login dù đúng mật
-    # khẩu. Mở trực tiếp = top-level navigation = cookie first-party, hoạt động bình thường.
-    keyboard = [[
-        InlineKeyboardButton(
-            text="🔧 Open VS Code",
-            web_app=WebAppInfo(url=VSCODE_PUBLIC_URL)
-        )
-    ]]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
+
     welcome_message = (
         "🚀 *VS Code Remote Control*\n\n"
-        "Click the button below to open VS Code from your phone!\n\n"
+        "Bấm nút 🔧 cạnh khung nhập tin nhắn để mở VS Code từ điện thoại!\n\n"
         "✨ Features:\n"
         "• Full VS Code interface\n"
         "• Use Claude for coding assistance\n"
@@ -98,19 +81,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• Run terminal commands\n\n"
         "ℹ️ Make sure your computer is running VS Code Server."
     )
-    
-    await update.message.reply_text(
-        welcome_message,
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
+
+    await update.message.reply_text(welcome_message, parse_mode='Markdown')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Help command handler"""
     help_text = (
         "🔧 *VS Code Mini App - Help*\n\n"
         "*Commands:*\n"
-        "/start - Open VS Code\n"
+        "/start - Giới thiệu (nút mở VS Code nằm ở menu 🔧 cạnh khung nhập tin nhắn)\n"
         "/help - Show this help\n"
         "/status - Check connection status\n\n"
         "*Troubleshooting:*\n"
@@ -166,11 +145,20 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     await update.message.reply_text(info_text, parse_mode='Markdown')
 
+async def post_init(application: Application) -> None:
+    # Đặt nút menu cố định cạnh khung nhập tin nhắn Telegram (áp dụng mặc định cho
+    # mọi chat với bot) — không cần cấu hình qua BotFather. Bot API không cho icon
+    # ảnh tuỳ chỉnh ở nút này, chỉ text ngắn.
+    await application.bot.set_chat_menu_button(
+        menu_button=MenuButtonWebApp(text="🔧 VS Code", web_app=WebAppInfo(url=VSCODE_PUBLIC_URL))
+    )
+    logger.info("✅ Đã đặt menu button 'VS Code' cạnh khung nhập tin nhắn")
+
 def main() -> None:
     """Start the bot."""
     # Create the Application
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
+
     # Register command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
