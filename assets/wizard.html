@@ -101,7 +101,10 @@ fetch('/api/status').then(r => r.json()).then(s => {
 
   html += `<div class="step">
     <h2>Token bot Telegram</h2>
-    <input type="text" id="token" name="token" value="${s.currentToken || ''}" placeholder="Lấy từ @BotFather (/newbot)" required>
+    <div class="pw-wrap">
+      <input type="password" id="token" name="token" value="${s.currentToken || ''}" placeholder="Lấy từ @BotFather (/newbot)" required>
+      <button type="button" id="toggleToken">👁</button>
+    </div>
     <div class="hint">${s.currentToken ? 'Đã có token đã lưu, để nguyên là giữ token cũ.' : 'Chưa có token, bắt buộc nhập.'}</div>
   </div>`;
 
@@ -118,6 +121,10 @@ fetch('/api/status').then(r => r.json()).then(s => {
   document.getElementById('togglePw').addEventListener('click', () => {
     const p = document.getElementById('password');
     p.type = p.type === 'password' ? 'text' : 'password';
+  });
+  document.getElementById('toggleToken').addEventListener('click', () => {
+    const t = document.getElementById('token');
+    t.type = t.type === 'password' ? 'text' : 'password';
   });
 
   form.addEventListener('submit', (e) => {
