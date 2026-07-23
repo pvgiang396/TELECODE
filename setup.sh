@@ -156,12 +156,16 @@ if [ "$HAS_GUI" = "1" ] && [ "${TELECODE_APPLYING:-0}" != "1" ]; then
     echo ""
     rm -f "$ANSWERS_FILE"
     info "Đang mở trình duyệt để cấu hình (http://127.0.0.1:8899)..."
-    python3 "$DIR/wizard.py" "$RUN_DIR" "$DIR"
+    # $PPID = PID shell cha (terminal tương tác) — với `curl|bash` thì install.sh
+    # dùng `exec bash setup.sh` nên PID không đổi xuyên suốt, $PPID ở đây chính là
+    # shell người dùng gõ lệnh; với `bash setup.sh` gõ tay cũng đúng tương tự.
+    # Truyền cho wizard.py để sau khi cài xong tự kill, đóng luôn terminal.
+    python3 "$DIR/wizard.py" "$RUN_DIR" "$DIR" "$PPID"
     if [ ! -f "$ANSWERS_FILE" ]; then
         err "Chưa nhận được câu trả lời (có thể bạn đóng tab trước khi bấm 'Bắt đầu cài đặt') — chạy lại 'bash setup.sh' để thử lại."
         exit 1
     fi
-    ok "Đã nhận cấu hình — chuyển cài đặt sang chạy nền, bạn có thể đóng terminal này."
+    ok "Đã nhận cấu hình — chuyển cài đặt sang chạy nền, terminal sẽ tự đóng khi xong."
     TELECODE_APPLYING=1 nohup bash "$0" > "$LOG_DIR/setup-apply.log" 2>&1 &
     disown
     echo "📄 Theo dõi tiến trình (không bắt buộc): tail -f $LOG_DIR/setup-apply.log"
@@ -462,10 +466,12 @@ if ! is_alive "$CS_PID"; then
 fi
 echo ""
 
-# --- 3b. Tạo shortcut Desktop mở VS Code (code-server) trên máy tính --------
+# --- 3b. Tạo shortcut Desktop "Telecode" mở code-server trên máy tính --------
 # Dùng luôn trên máy tính (không qua Telegram/tunnel) = mở localhost:8443 thẳng,
 # nhanh hơn nhiều vì không qua Cloudflare. Idempotent: ghi đè mỗi lần chạy để
 # luôn trỏ đúng cấu hình hiện tại (không cần xoá tay trước khi tạo lại).
+# Xoá luôn shortcut tên cũ (từ bản trước khi đổi tên thành "Telecode") nếu còn sót.
+rm -f "$HOME/Desktop/code-server.desktop" "$HOME/Desktop/VS Code (code-server).command"
 #
 # Mở bằng trình duyệt Chrome/Edge/Chromium ở chế độ --app= (ẩn thanh địa chỉ,
 # giống app desktop thật) — tham khảo openAppModeBrowser() trong yan2ai/tray.js.
@@ -495,7 +501,7 @@ if [ -d "$HOME/Desktop" ]; then
     ICON_FILE="$DIR/assets/icon.png"
     APP_BROWSER="$(resolve_app_mode_browser_bin || true)"
     if [ "$OS" = "mac" ]; then
-        SHORTCUT="$HOME/Desktop/VS Code (code-server).command"
+        SHORTCUT="$HOME/Desktop/Telecode.command"
         if [ -n "$APP_BROWSER" ]; then
             cat > "$SHORTCUT" <<EOF
 #!/bin/bash
@@ -509,7 +515,7 @@ EOF
         fi
         chmod +x "$SHORTCUT"
     else
-        SHORTCUT="$HOME/Desktop/code-server.desktop"
+        SHORTCUT="$HOME/Desktop/telecode.desktop"
         if [ -n "$APP_BROWSER" ]; then
             EXEC_LINE="$APP_BROWSER --app=http://localhost:8443"
         else
@@ -518,8 +524,8 @@ EOF
         cat > "$SHORTCUT" <<EOF
 [Desktop Entry]
 Type=Application
-Name=VS Code (code-server)
-Comment=Mở VS Code (code-server) tại localhost:8443
+Name=Telecode
+Comment=Telecode by Yan
 Exec=$EXEC_LINE
 Icon=${ICON_FILE:-code}
 Terminal=false
@@ -655,6 +661,17 @@ if ! is_alive "$BOT_PID"; then
 fi
 ok "Bot đang chạy (PID $(cat "$BOT_PID"))"
 echo ""
+
+# --- 10. Tự đóng terminal (chỉ khi cài qua wizard web) -----------------------
+# $PPID lúc mở wizard đã được lưu vào wizard-answers.json — cài xong hết thì kill
+# PID đó để đóng shell/terminal, không cần user tự đóng. Đặt SAU CÙNG (mọi bước
+# cài đặt/khởi động đã xong) để không có gì phụ thuộc chạy tiếp sau khi terminal mất.
+if [ "${TELECODE_APPLYING:-0}" = "1" ] && [ -f "$ANSWERS_FILE" ]; then
+    CALLER_PID="$(answers_get "_callerPid")"
+    if [ -n "$CALLER_PID" ] && kill -0 "$CALLER_PID" 2>/dev/null; then
+        kill "$CALLER_PID" 2>/dev/null
+    fi
+fi
 
 echo "======================================"
 ok "Setup xong!"

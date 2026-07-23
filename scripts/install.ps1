@@ -39,7 +39,8 @@ wsl -d Ubuntu -- bash -lc "curl -fsSL https://gitlab.com/pvgiang396/telecode/-/r
 # trong repo, đọc qua đường dẫn UNC \\wsl$\...), (2) mở Edge ở chế độ --app= (ẩn
 # thanh địa chỉ, giống app desktop thật) thay vì mở tab trình duyệt thường.
 $desktop = [Environment]::GetFolderPath("Desktop")
-$shortcutPath = Join-Path $desktop "VS Code (code-server).lnk"
+$shortcutPath = Join-Path $desktop "Telecode.lnk"
+Remove-Item (Join-Path $desktop "VS Code (code-server).lnk") -ErrorAction SilentlyContinue  # dọn shortcut tên cũ nếu còn sót
 
 $wslUser = (wsl -d Ubuntu -- whoami 2>$null).Trim()
 $iconPath = if ($wslUser) { "\\wsl$\Ubuntu\home\$wslUser\telecode\assets\icon.ico" } else { $null }

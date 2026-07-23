@@ -108,7 +108,7 @@ def probe_status(run_dir: Path) -> dict:
     }
 
 
-def make_handler(run_dir: Path, dir_: Path):
+def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
     wizard_html = (dir_ / "assets" / "wizard.html").read_text(encoding="utf-8")
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -147,6 +147,10 @@ def make_handler(run_dir: Path, dir_: Path):
             except json.JSONDecodeError:
                 self._send_json(400, {"error": "invalid json"})
                 return
+            # _callerPid lấy từ argv (server tự biết, KHÔNG lấy từ form client) để
+            # tránh client giả mạo PID rồi làm setup.sh kill nhầm tiến trình khác.
+            if caller_pid:
+                answers["_callerPid"] = caller_pid
             (run_dir / "wizard-answers.json").write_text(json.dumps(answers, ensure_ascii=False, indent=2))
             self._send_json(200, {"ok": True})
             threading.Thread(target=lambda: (time.sleep(0.3), os._exit(0))).start()
@@ -208,13 +212,14 @@ def open_browser_plain(url: str):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: wizard.py <RUN_DIR> <DIR>", file=sys.stderr)
+        print("Usage: wizard.py <RUN_DIR> <DIR> [caller_pid]", file=sys.stderr)
         sys.exit(1)
     run_dir = Path(sys.argv[1])
     dir_ = Path(sys.argv[2])
+    caller_pid = sys.argv[3] if len(sys.argv) > 3 else ""
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), make_handler(run_dir, dir_))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), make_handler(run_dir, dir_, caller_pid))
     url = f"http://127.0.0.1:{PORT}/"
     print(f"✅ Wizard đang chạy tại {url}")
     threading.Timer(0.5, lambda: open_browser_plain(url)).start()

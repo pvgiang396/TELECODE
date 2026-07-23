@@ -44,12 +44,28 @@
   #msg.err { color: #f87171; }
   #msg.ok { color: #4ade80; }
   #loading { text-align: center; padding: 60px 0; color: #9a9a9a; }
+  details.collapse { padding: 0; overflow: hidden; }
+  details.collapse summary {
+    list-style: none; cursor: pointer; padding: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  details.collapse summary::-webkit-details-marker { display: none; }
+  details.collapse summary::marker { content: ""; }
+  details.collapse .chevron {
+    display: inline-block; font-size: 11px; color: #8a8a8a;
+    transition: transform .15s ease; flex-shrink: 0;
+  }
+  details.collapse[open] .chevron { transform: rotate(90deg); }
+  details.collapse summary h2 { margin: 0; flex: 1; }
+  details.collapse .summary-current { font-size: 12px; color: #8a8a8a; }
+  details.collapse[open] summary { border-bottom: 1px solid #3c3c3c; }
+  details.collapse .collapse-body { padding: 14px 16px 16px; }
 </style>
 </head>
 <body>
   <div class="card">
     <h1>🚀 Cài đặt telecode</h1>
-    <div class="sub">Chọn xong bấm "Bắt đầu cài đặt" — terminal sẽ tự tiếp tục ở nền, không cần quay lại đó.</div>
+    <div class="sub">Chọn xong bấm "Bắt đầu cài đặt" — terminal sẽ tự tiếp tục ở nền rồi tự đóng khi xong.</div>
     <div id="loading">Đang kiểm tra trạng thái máy...</div>
     <form id="form" style="display:none"></form>
     <div id="msg"></div>
@@ -71,11 +87,29 @@ function radioGroup(name, label, current) {
   </div>`;
 }
 
+// Dùng cho mục ĐÃ CÀI/ĐANG CHẠY sẵn (mặc định chọn "Giữ nguyên") — thu gọn lại vì
+// không cần chú ý tới, bấm vào summary mới hiện radio bên trong.
+function collapsibleRadioGroup(name, label, current) {
+  return `<details class="step collapse">
+    <summary>
+      <span class="chevron">▸</span>
+      <h2>${label}</h2>
+      <span class="summary-current">${current}</span>
+    </summary>
+    <div class="collapse-body">
+      <div class="radio-row">
+        <label><input type="radio" name="${name}" value="keep" checked> Giữ nguyên</label>
+        <label><input type="radio" name="${name}" value="redo"> Cài lại / khởi động lại</label>
+      </div>
+    </div>
+  </details>`;
+}
+
 fetch('/api/status').then(r => r.json()).then(s => {
   let html = '';
 
   if (s.codeServerInstalled) {
-    html += radioGroup('codeServerAction', 'code-server', `đã cài (${s.codeServerVersion})`);
+    html += collapsibleRadioGroup('codeServerAction', 'code-server', `đã cài (${s.codeServerVersion})`);
   }
 
   html += `<div class="step">
@@ -88,15 +122,15 @@ fetch('/api/status').then(r => r.json()).then(s => {
   </div>`;
 
   if (s.codeServerRunning) {
-    html += radioGroup('codeServerRunAction', 'code-server: tiến trình', `đang chạy (PID ${s.codeServerPid})`);
+    html += collapsibleRadioGroup('codeServerRunAction', 'code-server: tiến trình', `đang chạy (PID ${s.codeServerPid})`);
   }
 
   if (s.cloudflaredInstalled) {
-    html += radioGroup('cloudflaredAction', 'cloudflared', `đã cài (${s.cloudflaredVersion})`);
+    html += collapsibleRadioGroup('cloudflaredAction', 'cloudflared', `đã cài (${s.cloudflaredVersion})`);
   }
 
   if (s.tunnelRunning) {
-    html += radioGroup('tunnelAction', 'Tunnel code-server', `đang chạy (${s.tunnelUrl || 'PID ' + s.tunnelPid})`);
+    html += collapsibleRadioGroup('tunnelAction', 'Tunnel code-server', `đang chạy (${s.tunnelUrl || 'PID ' + s.tunnelPid})`);
   }
 
   html += `<div class="step">
@@ -137,7 +171,7 @@ fetch('/api/status').then(r => r.json()).then(s => {
       .then(r => r.json())
       .then(() => {
         msg.className = 'ok';
-        msg.textContent = '✅ Đã lưu! Cài đặt đang tiếp tục ở nền — bạn có thể đóng tab này và đóng terminal.';
+        msg.textContent = '✅ Đã lưu! Cài đặt đang tiếp tục ở nền — terminal sẽ tự đóng khi xong, bạn có thể đóng tab này.';
       })
       .catch(() => {
         msg.className = 'err';
