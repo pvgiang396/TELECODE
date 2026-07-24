@@ -574,7 +574,13 @@ EOF
     else
         SHORTCUT="$HOME/Desktop/telecode.desktop"
         if [ -n "$APP_BROWSER" ]; then
-            EXEC_LINE="$APP_BROWSER --app=http://localhost:8443"
+            # --class=Telecode: Chrome --app= mac dinh dat WM_CLASS="Google-chrome"
+            # (giong het cua so Chrome that) -> Cinnamon/GNOME nhan dien trung voi
+            # google-chrome.desktop (StartupWMClass=Google-chrome) da cai san, taskbar
+            # luon hien icon Chrome that, bo qua ca favicon lan Icon= o duoi (bug that
+            # da xac minh qua xprop). Doi WM_CLASS rieng + StartupWMClass= khop ben duoi
+            # de desktop environment dung dung Icon= cua file nay.
+            EXEC_LINE="$APP_BROWSER --app=http://localhost:8443 --class=Telecode"
         else
             EXEC_LINE="xdg-open http://localhost:8443"
         fi
@@ -585,6 +591,7 @@ Name=Telecode
 Comment=Telecode by Yan
 Exec=$EXEC_LINE
 Icon=${ICON_FILE:-code}
+StartupWMClass=Telecode
 Terminal=false
 Categories=Development;
 EOF
@@ -799,7 +806,9 @@ echo ""
 if [ "${TELECODE_APPLYING:-0}" = "1" ] && [ -f "$ANSWERS_FILE" ]; then
     APP_BROWSER="$(resolve_app_mode_browser_bin || true)"
     if [ -n "$APP_BROWSER" ]; then
-        nohup "$APP_BROWSER" --app=http://localhost:8443 >/dev/null 2>&1 &
+        # --class=Telecode: xem giai thich o buoc 3b (tao shortcut Desktop) - khong
+        # dat se bi Cinnamon/GNOME nhan icon Chrome that thay vi icon rieng.
+        nohup "$APP_BROWSER" --app=http://localhost:8443 --class=Telecode >/dev/null 2>&1 &
     else
         nohup xdg-open http://localhost:8443 >/dev/null 2>&1 &
     fi
