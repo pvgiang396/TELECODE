@@ -185,28 +185,34 @@ if [ "$HAS_GUI" = "1" ] && [ "${TELECODE_APPLYING:-0}" != "1" ]; then
     fi
     ok "Đã nhận cấu hình — chuyển cài đặt sang chạy nền, terminal sẽ tự đóng khi xong."
 
-    # --- Xin sudo 1 LẦN ở đây, KHI CÒN TTY THẬT --------------------------------
+    # --- Cấp quyền ghi 1 LẦN cho code-server bằng pkexec (KHÔNG dùng sudo) -------
     # Từ dòng "nohup bash "$0" ... &" bên dưới trở đi, script chạy NỀN (detached
-    # khỏi terminal) — không còn TTY nên MỌI lệnh `sudo` phía sau (kể cả patch
-    # favicon/login qua patch_code_server_assets()) sẽ fail ÂM THẦM (sudo không có
-    # gì để hỏi mật khẩu, không hang, chỉ lỗi rồi script vẫn "ok" nhầm vì không kiểm
-    # tra exit code) — bug thật đã xác minh: favicon/PWA icon riêng KHÔNG BAO GIỜ áp
-    # dụng được khi cài qua wizard (chỉ login.html/css từng patch được ở lần chạy
-    # thủ công qua terminal thật, trước khi phần copy favicon được thêm vào code).
-    # Né hẳn vấn đề: chown 1 LẦN thư mục code-server cần ghi sang user hiện tại ngay
-    # bây giờ (còn sudo hỏi được) — patch_code_server_assets() ở các lần chạy nền
-    # sau (kể cả lần này) sẽ không cần sudo nữa (đã tự phát hiện qua "[ -w "$html" ]").
-    # Cũng validate/cache sudo ở đây (best-effort) — nếu sudoers không bật
-    # tty_tickets (mặc định thường BẬT, cache theo từng TTY) thì các lệnh sudo khác
-    # ở tiến trình nền phía sau (vd `sudo tailscale up/serve/funnel`) có thể tận dụng
-    # được cache này; nếu tty_tickets bật (phổ biến) thì các lệnh đó vẫn có thể fail
-    # âm thầm khi chạy nền — hạn chế đã biết, chưa xử lý triệt để.
-    sudo -v || warn "Không xác thực được sudo — các bước cần quyền root phía sau có thể bị bỏ qua."
+    # khỏi terminal) — mọi lệnh `sudo` phía sau (kể cả patch favicon/login qua
+    # patch_code_server_assets()) sẽ fail ÂM THẦM. Ban đầu tưởng chỉ cần xin `sudo -v`
+    # NGAY TẠI ĐÂY (còn coi là "foreground") là đủ, nhưng xác minh thật (log
+    # setup-apply.log của 1 lần chạy quickstart qua `curl | bash`) cho thấy NGAY CẢ Ở
+    # ĐÂY cũng không đọc được mật khẩu qua TTY (`sudo: unable to read password:
+    # Input/output error`) — luồng `curl | bash` không đảm bảo có TTY thật cho sudo
+    # dùng, kể cả trước khi chạy nền. Vì nhánh này CHỈ chạy khi có GUI (HAS_GUI=1 —
+    # yêu cầu bắt buộc để mở được wizard.py), DISPLAY chắc chắn có sẵn -> dùng
+    # `pkexec` (hộp thoại polkit đồ hoạ, không cần TTY, đọc thẳng DISPLAY) thay cho
+    # `sudo` cho ĐÚNG 1 việc: chown thư mục code-server sang user hiện tại 1 lần duy
+    # nhất — sau đó patch_code_server_assets() tự phát hiện đã ghi được
+    # ("[ -w "$html" ]") nên không cần sudo/pkexec nữa ở mọi lần chạy sau, kể cả chạy
+    # nền. Không dùng pkexec cho `tailscale up/serve/funnel` (bước 4/5) vì đó là lệnh
+    # CẦN CHẠY LẶP LẠI với quyền root ở mỗi lần, không phải việc 1 lần như chown —
+    # vẫn còn hạn chế đã biết (có thể fail âm thầm khi qua wizard), chưa xử lý.
     CS_ROOT_PRECHOWN="$(find_code_server_root 2>/dev/null || true)"
     if [ -n "$CS_ROOT_PRECHOWN" ] && [ ! -w "$CS_ROOT_PRECHOWN/src/browser/pages/login.html" ]; then
-        info "Cấp quyền ghi 1 lần cho thư mục code-server (cần mật khẩu sudo)..."
-        sudo chown -R "$(id -u):$(id -g)" "$CS_ROOT_PRECHOWN/src/browser/pages" "$CS_ROOT_PRECHOWN/src/browser/media" \
-            || warn "Không chown được thư mục code-server — icon/favicon riêng có thể không áp dụng được ở lần chạy nền này."
+        if command -v pkexec &>/dev/null; then
+            info "Cấp quyền ghi 1 lần cho thư mục code-server (xác nhận qua hộp thoại)..."
+            pkexec chown -R "$(id -u):$(id -g)" "$CS_ROOT_PRECHOWN/src/browser/pages" "$CS_ROOT_PRECHOWN/src/browser/media" \
+                || warn "Không chown được thư mục code-server (pkexec) — icon/favicon riêng có thể không áp dụng được ở lần chạy nền này."
+        else
+            info "Cấp quyền ghi 1 lần cho thư mục code-server (cần mật khẩu sudo)..."
+            sudo chown -R "$(id -u):$(id -g)" "$CS_ROOT_PRECHOWN/src/browser/pages" "$CS_ROOT_PRECHOWN/src/browser/media" \
+                || warn "Không chown được thư mục code-server — icon/favicon riêng có thể không áp dụng được ở lần chạy nền này."
+        fi
     fi
     # code-server CHƯA cài (lần đầu) -> CS_ROOT_PRECHOWN rỗng, không chown được gì ở
     # đây; patch_code_server_assets() ở lần chạy nền đầu tiên đó vẫn có thể fail sudo
@@ -421,6 +427,93 @@ PYEOF
 patch_code_server_assets
 echo ""
 
+# --- 1cb. Tạo shortcut Desktop "Telecode" mở code-server trên máy tính -------
+# Đặt NGAY SAU bước patch favicon/icon (không phải ở "3b" như trước) — bug thật đã
+# gặp: 1 lỗi ở bước sau (vd 1e cài Copilot crash "unbound variable" dưới `set -u`,
+# không có `set -e` nên các bước TRƯỚC ĐÓ đã chạy vẫn giữ nguyên nhưng các bước SAU
+# ĐIỂM CRASH không bao giờ chạy tới) từng khiến shortcut/icon KHÔNG BAO GIỜ được tạo
+# lại dù setup.sh chạy xong tới đây. Đặt các bước liên quan tới icon/shortcut CÀNG
+# SỚM CÀNG TỐT để không phụ thuộc vào các bước ít liên quan (Copilot/Tailscale/bot)
+# chạy trót lọt. Dùng luôn trên máy tính (không qua Telegram/tunnel) = mở
+# localhost:8443 thẳng, nhanh hơn nhiều vì không qua Cloudflare. Idempotent: ghi đè
+# mỗi lần chạy để luôn trỏ đúng cấu hình hiện tại (không cần xoá tay trước khi tạo lại).
+# Xoá luôn shortcut tên cũ (từ bản trước khi đổi tên thành "Telecode") nếu còn sót.
+rm -f "$HOME/Desktop/code-server.desktop" "$HOME/Desktop/VS Code (code-server).command"
+#
+# Mở bằng trình duyệt Chrome/Edge/Chromium ở chế độ --app= (ẩn thanh địa chỉ,
+# giống app desktop thật) — tham khảo openAppModeBrowser() trong yan2ai/tray.js.
+# Không tìm thấy trình duyệt nào trong nhóm Chromium -> fallback mở tab thường.
+resolve_app_mode_browser_bin() {
+    local candidates=()
+    if [ "$OS" = "mac" ]; then
+        candidates=(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+            "/Applications/Chromium.app/Contents/MacOS/Chromium"
+        )
+    else
+        candidates=(google-chrome google-chrome-stable chromium chromium-browser microsoft-edge microsoft-edge-stable)
+    fi
+    for c in "${candidates[@]}"; do
+        if [ "${c:0:1}" = "/" ]; then
+            [ -x "$c" ] && { echo "$c"; return 0; }
+        else
+            command -v "$c" &>/dev/null && { command -v "$c"; return 0; }
+        fi
+    done
+    return 1
+}
+
+if [ -d "$HOME/Desktop" ]; then
+    ICON_FILE="$DIR/assets/icon.png"
+    APP_BROWSER="$(resolve_app_mode_browser_bin || true)"
+    if [ "$OS" = "mac" ]; then
+        SHORTCUT="$HOME/Desktop/Telecode.command"
+        if [ -n "$APP_BROWSER" ]; then
+            cat > "$SHORTCUT" <<EOF
+#!/bin/bash
+"$APP_BROWSER" --app=http://localhost:8443
+EOF
+        else
+            cat > "$SHORTCUT" <<EOF
+#!/bin/bash
+open http://localhost:8443
+EOF
+        fi
+        chmod +x "$SHORTCUT"
+    else
+        SHORTCUT="$HOME/Desktop/telecode.desktop"
+        if [ -n "$APP_BROWSER" ]; then
+            # --class=Telecode: Chrome --app= mac dinh dat WM_CLASS="Google-chrome"
+            # (giong het cua so Chrome that) -> Cinnamon/GNOME nhan dien trung voi
+            # google-chrome.desktop (StartupWMClass=Google-chrome) da cai san, taskbar
+            # luon hien icon Chrome that, bo qua ca favicon lan Icon= o duoi (bug that
+            # da xac minh qua xprop). Doi WM_CLASS rieng + StartupWMClass= khop ben duoi
+            # de desktop environment dung dung Icon= cua file nay.
+            EXEC_LINE="$APP_BROWSER --app=http://localhost:8443 --class=Telecode"
+        else
+            EXEC_LINE="xdg-open http://localhost:8443"
+        fi
+        cat > "$SHORTCUT" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Telecode
+Comment=Telecode by Yan
+Exec=$EXEC_LINE
+Icon=${ICON_FILE:-code}
+StartupWMClass=Telecode
+Terminal=false
+Categories=Development;
+EOF
+        chmod +x "$SHORTCUT"
+        command -v gio >/dev/null 2>&1 && gio set "$SHORTCUT" metadata::trusted true 2>/dev/null || true
+    fi
+    ok "Đã tạo shortcut Desktop: $SHORTCUT"
+else
+    warn "Không thấy thư mục $HOME/Desktop — bỏ qua tạo shortcut (bạn vẫn mở tay http://localhost:8443)."
+fi
+echo ""
+
 # --- 1d. Đảm bảo settings.json có baseline hợp lý ----------------------------
 # security.workspace.trust.enabled=false: tắt hẳn Workspace Trust. Không phải
 # workspace lạ cần "tin cậy" — đây là máy/project của chính người dùng. Trạng thái
@@ -471,7 +564,19 @@ echo ""
 # đăng nhập là bước riêng của người dùng sau này (Command Palette > "GitHub
 # Copilot: Sign In"), không đăng nhập được thì extension chỉ nằm im, không lỗi.
 install_vsix_extension() { # install_vsix_extension <publisher> <name>
-    local publisher="$1" name="$2" vsix="$RUN_DIR/${name}.vsix"
+    # "${1:-}"/"${2:-}" (không phải "$1"/"$2" trần) — bug thật đã gặp: 1 lần chạy
+    # nền qua wizard bị "line N: name: unbound variable" ngay khi vào hàm này (dưới
+    # `set -uo pipefail`, không có `set -e`) làm CRASH TOÀN BỘ setup.sh giữa chừng —
+    # mọi bước sau (2→9, kể cả tạo lại shortcut Desktop ở 3b) không bao giờ chạy tới,
+    # dù các call site đều truyền đủ 2 tham số (chưa xác định được vì sao $2 rỗng lần
+    # đó). Phòng vệ ở đây: nếu thiếu tham số thì cảnh báo + return, KHÔNG để cả script
+    # dừng lại vì 1 hàm phụ (cài Copilot) không quan trọng bằng các bước còn lại.
+    local publisher="${1:-}" name="${2:-}" vsix
+    if [ -z "$publisher" ] || [ -z "$name" ]; then
+        warn "install_vsix_extension gọi thiếu tham số (publisher='$publisher' name='$name') — bỏ qua."
+        return 1
+    fi
+    vsix="$RUN_DIR/${name}.vsix"
     # --compressed: Marketplace CDN trả file .vsix đã gzip sẵn (content-encoding:
     # gzip) -> thiếu cờ này curl lưu thẳng byte gzip thô xuống đĩa (không phải
     # zip hợp lệ), `code-server --install-extension` cài lỗi âm thầm nếu không
@@ -554,87 +659,6 @@ if ! is_alive "$CS_PID"; then
     echo $! > "$CS_PID"
     sleep 2
     ok "code-server đang chạy tại http://localhost:8443, thư mục: $CODE_SERVER_WORKSPACE (PID $(cat "$CS_PID"))"
-fi
-echo ""
-
-# --- 3b. Tạo shortcut Desktop "Telecode" mở code-server trên máy tính --------
-# Dùng luôn trên máy tính (không qua Telegram/tunnel) = mở localhost:8443 thẳng,
-# nhanh hơn nhiều vì không qua Cloudflare. Idempotent: ghi đè mỗi lần chạy để
-# luôn trỏ đúng cấu hình hiện tại (không cần xoá tay trước khi tạo lại).
-# Xoá luôn shortcut tên cũ (từ bản trước khi đổi tên thành "Telecode") nếu còn sót.
-rm -f "$HOME/Desktop/code-server.desktop" "$HOME/Desktop/VS Code (code-server).command"
-#
-# Mở bằng trình duyệt Chrome/Edge/Chromium ở chế độ --app= (ẩn thanh địa chỉ,
-# giống app desktop thật) — tham khảo openAppModeBrowser() trong yan2ai/tray.js.
-# Không tìm thấy trình duyệt nào trong nhóm Chromium -> fallback mở tab thường.
-resolve_app_mode_browser_bin() {
-    local candidates=()
-    if [ "$OS" = "mac" ]; then
-        candidates=(
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
-            "/Applications/Chromium.app/Contents/MacOS/Chromium"
-        )
-    else
-        candidates=(google-chrome google-chrome-stable chromium chromium-browser microsoft-edge microsoft-edge-stable)
-    fi
-    for c in "${candidates[@]}"; do
-        if [ "${c:0:1}" = "/" ]; then
-            [ -x "$c" ] && { echo "$c"; return 0; }
-        else
-            command -v "$c" &>/dev/null && { command -v "$c"; return 0; }
-        fi
-    done
-    return 1
-}
-
-if [ -d "$HOME/Desktop" ]; then
-    ICON_FILE="$DIR/assets/icon.png"
-    APP_BROWSER="$(resolve_app_mode_browser_bin || true)"
-    if [ "$OS" = "mac" ]; then
-        SHORTCUT="$HOME/Desktop/Telecode.command"
-        if [ -n "$APP_BROWSER" ]; then
-            cat > "$SHORTCUT" <<EOF
-#!/bin/bash
-"$APP_BROWSER" --app=http://localhost:8443
-EOF
-        else
-            cat > "$SHORTCUT" <<EOF
-#!/bin/bash
-open http://localhost:8443
-EOF
-        fi
-        chmod +x "$SHORTCUT"
-    else
-        SHORTCUT="$HOME/Desktop/telecode.desktop"
-        if [ -n "$APP_BROWSER" ]; then
-            # --class=Telecode: Chrome --app= mac dinh dat WM_CLASS="Google-chrome"
-            # (giong het cua so Chrome that) -> Cinnamon/GNOME nhan dien trung voi
-            # google-chrome.desktop (StartupWMClass=Google-chrome) da cai san, taskbar
-            # luon hien icon Chrome that, bo qua ca favicon lan Icon= o duoi (bug that
-            # da xac minh qua xprop). Doi WM_CLASS rieng + StartupWMClass= khop ben duoi
-            # de desktop environment dung dung Icon= cua file nay.
-            EXEC_LINE="$APP_BROWSER --app=http://localhost:8443 --class=Telecode"
-        else
-            EXEC_LINE="xdg-open http://localhost:8443"
-        fi
-        cat > "$SHORTCUT" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Telecode
-Comment=Telecode by Yan
-Exec=$EXEC_LINE
-Icon=${ICON_FILE:-code}
-StartupWMClass=Telecode
-Terminal=false
-Categories=Development;
-EOF
-        chmod +x "$SHORTCUT"
-        command -v gio >/dev/null 2>&1 && gio set "$SHORTCUT" metadata::trusted true 2>/dev/null || true
-    fi
-    ok "Đã tạo shortcut Desktop: $SHORTCUT"
-else
-    warn "Không thấy thư mục $HOME/Desktop — bỏ qua tạo shortcut (bạn vẫn mở tay http://localhost:8443)."
 fi
 echo ""
 
@@ -840,7 +864,7 @@ echo ""
 if [ "${TELECODE_APPLYING:-0}" = "1" ] && [ -f "$ANSWERS_FILE" ]; then
     APP_BROWSER="$(resolve_app_mode_browser_bin || true)"
     if [ -n "$APP_BROWSER" ]; then
-        # --class=Telecode: xem giai thich o buoc 3b (tao shortcut Desktop) - khong
+        # --class=Telecode: xem giai thich o buoc 1cb (tao shortcut Desktop) - khong
         # dat se bi Cinnamon/GNOME nhan icon Chrome that thay vi icon rieng.
         nohup "$APP_BROWSER" --app=http://localhost:8443 --class=Telecode >/dev/null 2>&1 &
     else
