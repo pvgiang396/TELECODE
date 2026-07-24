@@ -79,7 +79,25 @@ def probe_status(run_dir: Path) -> dict:
             ts_version = ""
 
     cs_running, cs_pid = is_alive(run_dir / "code-server.pid")
+    # setup.sh ưu tiên systemd --user cho bot.py (Restart=always, tự hồi sinh khi
+    # crash) trên Linux có systemd — file PID cũ chỉ còn để tương thích hiển thị,
+    # không phản ánh đúng trạng thái sống/chết sau khi service tự restart 1 lần.
+    # Kiểm tra thẳng qua systemctl nếu unit tồn tại, fallback về PID file cũ.
     bot_running, bot_pid = is_alive(run_dir / "bot.pid")
+    if (Path.home() / ".config/systemd/user/telecode-bot.service").exists():
+        try:
+            active = subprocess.run(
+                ["systemctl", "--user", "is-active", "telecode-bot"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            bot_running = active == "active"
+            if bot_running:
+                bot_pid = int(subprocess.run(
+                    ["systemctl", "--user", "show", "telecode-bot", "-p", "MainPID", "--value"],
+                    capture_output=True, text=True, timeout=5,
+                ).stdout.strip() or 0)
+        except Exception:
+            pass
 
     funnel_configured = False
     tailscale_url = ""

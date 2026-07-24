@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import yaml
 from pathlib import Path
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonCommands
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonCommands, MenuButtonWebApp, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Configure logging
@@ -117,18 +117,10 @@ def discover_tailnet_peers() -> list[tuple[str, str]]:
     return peers
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Start command handler — ghi nhận chủ sở hữu lần đầu, health-check các máy
-    trong tailnet rồi trả về nút/inline keyboard mở đúng (những) máy đang online."""
-    user = update.message.from_user
-    logger.info(f"👤 User started bot: {user.first_name} (@{user.username})")
-
-    state = load_state()
-    if state.get("owner_chat_id") is None:
-        state["owner_chat_id"] = update.effective_chat.id
-        save_state(state)
-        logger.info(f"✅ Đã ghi nhận chủ sở hữu: chat_id={update.effective_chat.id}")
-
+async def discover_alive_servers() -> list[tuple[str, str]]:
+    """Health-check các máy trong tailnet (hoặc VSCODE_PUBLIC_URL nếu không có
+    Tailscale), trả về [] nếu không máy nào online. Dùng chung cho start() và
+    post_init() (đặt menu button)."""
     peers = discover_tailnet_peers()
     candidates = peers if peers else [("VS Code", VSCODE_PUBLIC_URL.replace("https://", "").replace("http://", ""))]
 
@@ -142,6 +134,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     alive.append((name, url))
             except Exception:
                 continue
+    return alive
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start command handler — ghi nhận chủ sở hữu lần đầu, health-check các máy
+    trong tailnet rồi trả về nút/inline keyboard mở đúng (những) máy đang online."""
+    user = update.message.from_user
+    logger.info(f"👤 User started bot: {user.first_name} (@{user.username})")
+
+    state = load_state()
+    if state.get("owner_chat_id") is None:
+        state["owner_chat_id"] = update.effective_chat.id
+        save_state(state)
+        logger.info(f"✅ Đã ghi nhận chủ sở hữu: chat_id={update.effective_chat.id}")
+
+    alive = await discover_alive_servers()
 
     if not alive:
         await update.message.reply_text("⚠️ Hiện chưa có server telecode nào online. Kiểm tra lại code-server/tailscale trên máy chạy telecode.")
@@ -266,11 +274,24 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(info_text, parse_mode='Markdown')
 
 async def post_init(application: Application) -> None:
-    # MenuButtonWebApp trỏ 1 URL TĨNH — không còn phù hợp vì URL giờ động theo số
-    # server đang online (xem start()/discover_tailnet_peers). Đổi sang menu lệnh
-    # chuẩn, /start là điểm vào chính để lấy URL luôn mới nhất.
-    await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-    logger.info("✅ Đã đặt menu button dạng danh sách lệnh (/start là điểm vào chính)")
+    # MenuButtonWebApp trỏ 1 URL TĨNH — chỉ set được khi biết chắc CHỈ 1 máy
+    # online lúc bot khởi động (health-check qua discover_alive_servers(), dùng
+    # chung logic với start()). Nếu ≥2 máy online cùng lúc (multi-server) hoặc
+    # chưa máy nào online, không đại diện được bằng 1 icon tĩnh -> fallback về
+    # menu danh sách lệnh, /start vẫn luôn là điểm vào đúng-mọi-lúc. Vì URL có
+    # thể đổi máy nào đang online sau khi bot đã chạy, icon menu chỉ phản ánh
+    # đúng trạng thái tại THỜI ĐIỂM bot khởi động — nếu server đổi, /start vẫn
+    # trả đúng, chỉ icon menu không tự cập nhật cho tới lần bot restart kế tiếp.
+    alive = await discover_alive_servers()
+    if len(alive) == 1:
+        name, url = alive[0]
+        await application.bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="🔧 VS Code", web_app=WebAppInfo(url=url))
+        )
+        logger.info(f"✅ Đã đặt menu button mở thẳng {name} ({url})")
+    else:
+        await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        logger.info(f"✅ Đã đặt menu button dạng danh sách lệnh ({len(alive)} máy online, /start là điểm vào chính)")
 
 def main() -> None:
     """Start the bot."""

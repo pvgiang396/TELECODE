@@ -709,11 +709,41 @@ TS_DNS_NAME="$(tailscale status --json 2>/dev/null | python3 -c "import json,sys
 [ -n "$TS_DNS_NAME" ] || { err "Không lấy được tên máy trong tailnet — kiểm tra 'tailscale status'"; exit 1; }
 
 if [ "$(ask_choice "5) Tailscale Funnel: cấu hình cho code-server (https://$TS_DNS_NAME)" "funnelAction")" = "redo" ] || ! tailscale funnel status 2>/dev/null | grep -q "127.0.0.1:8443"; then
-    sudo tailscale serve --bg --set-path=/ http://127.0.0.1:8443
-    sudo tailscale funnel --bg 443
+    # Từ Tailscale ~1.9x, `funnel <target>` tự làm luôn cả serve+funnel, target là
+    # LOCAL PORT (không phải cổng public 443 như cú pháp cũ) — bug thật đã gặp:
+    # chạy thêm `tailscale funnel --bg 443` sau bước serve sẽ bị hiểu là "serve
+    # cổng nội bộ 443" (không có gì lắng nghe ở đó), ĐÈ mất cấu hình serve 8443
+    # vừa set, gây 502 khi mở URL public. Không cần bước `tailscale serve` riêng
+    # nữa — `tailscale funnel reset` trước khi set lại để tránh mắc cấu hình cũ.
+    sudo tailscale funnel reset
+    sudo tailscale funnel --bg 8443
 fi
 VSCODE_PUBLIC_URL="https://$TS_DNS_NAME"
-ok "VS Code funnel: $VSCODE_PUBLIC_URL"
+
+# Verify Funnel THỰC SỰ hoạt động (không chỉ tin lệnh trên chạy xong không báo
+# lỗi) — bug thật đã gặp: cú pháp tailscale sai vẫn "chạy xong" bình thường
+# nhưng route sai cổng backend nội bộ, gây HTTP 502 mà chỉ phát hiện được khi
+# tự tay mở URL từ điện thoại. Retry vài lần vì Funnel/cert có thể mất 1-2s để
+# áp dụng ngay sau khi cấu hình.
+FUNNEL_HTTP_CODE="000"
+for _ in $(seq 1 10); do
+    FUNNEL_HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$VSCODE_PUBLIC_URL" 2>/dev/null || echo 000)"
+    case "$FUNNEL_HTTP_CODE" in
+        000|502|503|504) sleep 1 ;;
+        *) break ;;
+    esac
+done
+case "$FUNNEL_HTTP_CODE" in
+    000|502|503|504)
+        err "Funnel cấu hình xong nhưng KHÔNG phản hồi đúng (HTTP $FUNNEL_HTTP_CODE) tại $VSCODE_PUBLIC_URL"
+        warn "Debug: chạy 'tailscale serve status --json' — trường Web.*.Handlers./.Proxy phải là http://127.0.0.1:8443."
+        warn "Nếu sai cổng: 'sudo tailscale funnel reset' rồi 'sudo tailscale funnel --bg 8443', sau đó chạy lại setup.sh."
+        exit 1
+        ;;
+    *)
+        ok "VS Code funnel: $VSCODE_PUBLIC_URL (đã xác nhận phản hồi HTTP $FUNNEL_HTTP_CODE)"
+        ;;
+esac
 echo ""
 
 # --- 6. Telegram Bot Token ---------------------------------------------------
@@ -839,26 +869,79 @@ ok "Dependencies Python sẵn sàng"
 echo ""
 
 # --- 9. Chạy bot ----------------------------------------------------------------
+# Ưu tiên systemd --user (Linux có systemd) — Restart=always tự hồi sinh bot khi
+# crash vì BẤT KỲ lý do gì (không chỉ riêng lỗi session của nohup/setsid). macOS
+# hoặc máy không có systemd --user thật sự dùng -> fallback setsid+nohup như cũ
+# (chỉ chống được đúng 1 nguyên nhân: terminal/session cha bị đóng đột ngột).
 BOT_PID="$RUN_DIR/bot.pid"
-if is_alive "$BOT_PID"; then
-    if [ "$(ask_choice "9) Bot: đang chạy (PID $(cat "$BOT_PID"))" "botAction")" = "redo" ]; then
-        stop_pid "$BOT_PID"
+BOT_SERVICE="telecode-bot"
+BOT_UNIT_FILE="$HOME/.config/systemd/user/${BOT_SERVICE}.service"
+USE_SYSTEMD=0
+if [ "$OS" = "linux" ] && command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+    USE_SYSTEMD=1
+fi
+
+is_bot_alive() {
+    if [ "$USE_SYSTEMD" = "1" ]; then
+        systemctl --user is-active --quiet "$BOT_SERVICE"
+    else
+        is_alive "$BOT_PID"
+    fi
+}
+
+if is_bot_alive; then
+    if [ "$(ask_choice "9) Bot: đang chạy" "botAction")" = "redo" ]; then
+        if [ "$USE_SYSTEMD" = "1" ]; then systemctl --user stop "$BOT_SERVICE"; else stop_pid "$BOT_PID"; fi
     fi
 fi
-if ! is_alive "$BOT_PID"; then
-    # setsid (không chỉ nohup) — nohup chỉ chặn SIGHUP, không tách session; nếu
-    # terminal/session cha bị đóng đột ngột, cả process group (kể cả tiến trình
-    # nohup) vẫn có thể bị kill theo. setsid tách hẳn session, cha thành init/
-    # systemd — sống sót qua việc đóng terminal. Bug thật đã gặp: bot chết lặng
-    # lẽ không traceback, không OOM-killer log, giữa 1 phiên setup.sh.
-    (cd "$DIR" && setsid nohup "$VENV_PY" bot.py > "$LOG_DIR/bot.log" 2>&1 < /dev/null & echo $! > "$BOT_PID")
-    sleep 1
-    if ! is_alive "$BOT_PID"; then
-        err "Bot khởi động rồi thoát ngay — xem log: $LOG_DIR/bot.log"
-        exit 1
+if ! is_bot_alive; then
+    if [ "$USE_SYSTEMD" = "1" ]; then
+        mkdir -p "$(dirname "$BOT_UNIT_FILE")"
+        cat > "$BOT_UNIT_FILE" <<EOF
+[Unit]
+Description=Telecode Telegram Bot
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$DIR
+ExecStart=$VENV_PY $DIR/bot.py
+Restart=always
+RestartSec=3
+StandardOutput=append:$LOG_DIR/bot.log
+StandardError=append:$LOG_DIR/bot.log
+
+[Install]
+WantedBy=default.target
+EOF
+        systemctl --user daemon-reload
+        systemctl --user enable --now "$BOT_SERVICE" >/dev/null 2>&1
+        sleep 1
+        if ! is_bot_alive; then
+            err "Bot (systemd) khởi động thất bại — xem: journalctl --user -u $BOT_SERVICE -n 50 --no-pager"
+            exit 1
+        fi
+        # Ghi PID thật vào $BOT_PID để wizard.py/is_alive cũ vẫn đọc được (tương
+        # thích ngược) — LƯU Ý: giá trị này lỗi thời ngay sau lần Restart=always
+        # kế tiếp, chỉ dùng để hiển thị tham khảo, không dùng để quyết định alive.
+        systemctl --user show "$BOT_SERVICE" -p MainPID --value > "$BOT_PID"
+    else
+        (cd "$DIR" && setsid nohup "$VENV_PY" bot.py > "$LOG_DIR/bot.log" 2>&1 < /dev/null & echo $! > "$BOT_PID")
+        sleep 1
+        if ! is_bot_alive; then
+            err "Bot khởi động rồi thoát ngay — xem log: $LOG_DIR/bot.log"
+            exit 1
+        fi
     fi
 fi
-ok "Bot đang chạy (PID $(cat "$BOT_PID"))"
+if [ "$USE_SYSTEMD" = "1" ]; then
+    ok "Bot đang chạy qua systemd --user (tự restart nếu crash) — service: $BOT_SERVICE"
+    if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q "Linger=yes"; then
+        warn "Bot sẽ dừng khi bạn logout khỏi máy — chạy 'loginctl enable-linger $(id -un)' 1 lần để giữ chạy nền 24/7 (cần trên máy chủ/VPS)."
+    fi
+else
+    ok "Bot đang chạy (PID $(cat "$BOT_PID")) — không tự restart nếu crash (cần systemd --user, hiện không khả dụng trên máy này)."
+fi
 echo ""
 
 # --- 10. Mở app Telecode + tự đóng terminal (chỉ khi cài qua wizard web) ----
