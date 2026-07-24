@@ -846,7 +846,12 @@ if is_alive "$BOT_PID"; then
     fi
 fi
 if ! is_alive "$BOT_PID"; then
-    (cd "$DIR" && nohup "$VENV_PY" bot.py > "$LOG_DIR/bot.log" 2>&1 & echo $! > "$BOT_PID")
+    # setsid (không chỉ nohup) — nohup chỉ chặn SIGHUP, không tách session; nếu
+    # terminal/session cha bị đóng đột ngột, cả process group (kể cả tiến trình
+    # nohup) vẫn có thể bị kill theo. setsid tách hẳn session, cha thành init/
+    # systemd — sống sót qua việc đóng terminal. Bug thật đã gặp: bot chết lặng
+    # lẽ không traceback, không OOM-killer log, giữa 1 phiên setup.sh.
+    (cd "$DIR" && setsid nohup "$VENV_PY" bot.py > "$LOG_DIR/bot.log" 2>&1 < /dev/null & echo $! > "$BOT_PID")
     sleep 1
     if ! is_alive "$BOT_PID"; then
         err "Bot khởi động rồi thoát ngay — xem log: $LOG_DIR/bot.log"
