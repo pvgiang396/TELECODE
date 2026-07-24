@@ -114,11 +114,11 @@ fetch('/api/status').then(r => r.json()).then(s => {
   if (s.codeServerRunning) {
     installedHtml += subRadioGroup('codeServerRunAction', 'code-server: tiến trình', `đang chạy (PID ${s.codeServerPid})`);
   }
-  if (s.cloudflaredInstalled) {
-    installedHtml += subRadioGroup('cloudflaredAction', 'cloudflared', `đã cài (${s.cloudflaredVersion})`);
+  if (s.tailscaleInstalled) {
+    installedHtml += subRadioGroup('tailscaleAction', 'Tailscale', `đã cài (${s.tailscaleVersion})`);
   }
-  if (s.tunnelRunning) {
-    installedHtml += subRadioGroup('tunnelAction', 'Tunnel code-server', `đang chạy (${s.tunnelUrl || 'PID ' + s.tunnelPid})`);
+  if (s.funnelConfigured) {
+    installedHtml += subRadioGroup('funnelAction', 'Tailscale Funnel', `đã cấu hình (${s.tailscaleUrl || 'chưa rõ URL'})`);
   }
   if (installedHtml) {
     html += `<details class="step collapse">

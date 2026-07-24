@@ -120,6 +120,24 @@ ask_choice() {
     [ "$sel" -eq 1 ] && echo "redo" || echo "keep"
 }
 
+# find_code_server_root: dò thư mục cài code-server (chứa src/browser/pages/login.html)
+# — định nghĩa SỚM (trước cả phần wizard/HAS_GUI ở dưới) vì bước "xin sudo 1 lần" cần
+# gọi hàm này trước khi script chạy nền qua nohup. Dùng lại y hệt ở patch_code_server_assets().
+find_code_server_root() {
+    local bin resolved dir
+    bin="$(command -v code-server)" || return 1
+    resolved="$(readlink -f "$bin" 2>/dev/null || echo "$bin")"
+    dir="$(dirname "$resolved")"
+    while [ "$dir" != "/" ]; do
+        [ -f "$dir/src/browser/pages/login.html" ] && { echo "$dir"; return 0; }
+        dir="$(dirname "$dir")"
+    done
+    for p in /usr/lib/code-server /usr/local/lib/code-server "$HOME/.local/lib/code-server"; do
+        [ -f "$p/src/browser/pages/login.html" ] && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
 is_alive() { # is_alive <pidfile>
     [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
 }
@@ -166,6 +184,34 @@ if [ "$HAS_GUI" = "1" ] && [ "${TELECODE_APPLYING:-0}" != "1" ]; then
         exit 1
     fi
     ok "Đã nhận cấu hình — chuyển cài đặt sang chạy nền, terminal sẽ tự đóng khi xong."
+
+    # --- Xin sudo 1 LẦN ở đây, KHI CÒN TTY THẬT --------------------------------
+    # Từ dòng "nohup bash "$0" ... &" bên dưới trở đi, script chạy NỀN (detached
+    # khỏi terminal) — không còn TTY nên MỌI lệnh `sudo` phía sau (kể cả patch
+    # favicon/login qua patch_code_server_assets()) sẽ fail ÂM THẦM (sudo không có
+    # gì để hỏi mật khẩu, không hang, chỉ lỗi rồi script vẫn "ok" nhầm vì không kiểm
+    # tra exit code) — bug thật đã xác minh: favicon/PWA icon riêng KHÔNG BAO GIỜ áp
+    # dụng được khi cài qua wizard (chỉ login.html/css từng patch được ở lần chạy
+    # thủ công qua terminal thật, trước khi phần copy favicon được thêm vào code).
+    # Né hẳn vấn đề: chown 1 LẦN thư mục code-server cần ghi sang user hiện tại ngay
+    # bây giờ (còn sudo hỏi được) — patch_code_server_assets() ở các lần chạy nền
+    # sau (kể cả lần này) sẽ không cần sudo nữa (đã tự phát hiện qua "[ -w "$html" ]").
+    # Cũng validate/cache sudo ở đây (best-effort) — nếu sudoers không bật
+    # tty_tickets (mặc định thường BẬT, cache theo từng TTY) thì các lệnh sudo khác
+    # ở tiến trình nền phía sau (vd `sudo tailscale up/serve/funnel`) có thể tận dụng
+    # được cache này; nếu tty_tickets bật (phổ biến) thì các lệnh đó vẫn có thể fail
+    # âm thầm khi chạy nền — hạn chế đã biết, chưa xử lý triệt để.
+    sudo -v || warn "Không xác thực được sudo — các bước cần quyền root phía sau có thể bị bỏ qua."
+    CS_ROOT_PRECHOWN="$(find_code_server_root 2>/dev/null || true)"
+    if [ -n "$CS_ROOT_PRECHOWN" ] && [ ! -w "$CS_ROOT_PRECHOWN/src/browser/pages/login.html" ]; then
+        info "Cấp quyền ghi 1 lần cho thư mục code-server (cần mật khẩu sudo)..."
+        sudo chown -R "$(id -u):$(id -g)" "$CS_ROOT_PRECHOWN/src/browser/pages" "$CS_ROOT_PRECHOWN/src/browser/media" \
+            || warn "Không chown được thư mục code-server — icon/favicon riêng có thể không áp dụng được ở lần chạy nền này."
+    fi
+    # code-server CHƯA cài (lần đầu) -> CS_ROOT_PRECHOWN rỗng, không chown được gì ở
+    # đây; patch_code_server_assets() ở lần chạy nền đầu tiên đó vẫn có thể fail sudo
+    # âm thầm — chạy lại 'bash setup.sh' một lần nữa (khi code-server đã có) sẽ tự fix.
+
     TELECODE_APPLYING=1 nohup bash "$0" > "$LOG_DIR/setup-apply.log" 2>&1 &
     disown
     echo "📄 Theo dõi tiến trình (không bắt buộc): tail -f $LOG_DIR/setup-apply.log"
@@ -200,20 +246,8 @@ echo ""
 # (không có TTY thật) khiến sudo không cache được xác thực giữa các lần gọi riêng
 # lẻ — tách 2 hàm/2 lệnh sudo sẽ hỏi lại mật khẩu lần nữa (đã gặp thật: 2 lần hỏi
 # dù mỗi hàm tự nó chỉ 1 lệnh). Gộp thành 1 lệnh = chỉ hỏi sudo đúng 1 lần.
-find_code_server_root() {
-    local bin resolved dir
-    bin="$(command -v code-server)" || return 1
-    resolved="$(readlink -f "$bin" 2>/dev/null || echo "$bin")"
-    dir="$(dirname "$resolved")"
-    while [ "$dir" != "/" ]; do
-        [ -f "$dir/src/browser/pages/login.html" ] && { echo "$dir"; return 0; }
-        dir="$(dirname "$dir")"
-    done
-    for p in /usr/lib/code-server /usr/local/lib/code-server "$HOME/.local/lib/code-server"; do
-        [ -f "$p/src/browser/pages/login.html" ] && { echo "$p"; return 0; }
-    done
-    return 1
-}
+# (find_code_server_root định nghĩa sớm hơn ở đầu file — xem "Xin sudo 1 lần" phía
+# trên phần wizard, cần hàm này TRƯỚC khi chạy nền.)
 
 patch_code_server_assets() {
     local root html css media

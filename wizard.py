@@ -64,27 +64,42 @@ def probe_status(run_dir: Path) -> dict:
         except Exception:
             cs_version = ""
 
-    cf_installed = shutil.which("cloudflared") is not None
-    cf_version = ""
-    if cf_installed:
+    # Tailscale thay cloudflared làm tunnel (xem setup.sh bước 4/5) — probe đúng 2
+    # lệnh setup.sh tự dùng để quyết định "keep"/"redo" (tailscale version / tailscale
+    # funnel status), không còn PID file/log riêng như cloudflared cũ (tailscaled là
+    # daemon hệ thống, không phải tiến trình con setup.sh tự quản).
+    ts_installed = shutil.which("tailscale") is not None
+    ts_version = ""
+    if ts_installed:
         try:
-            cf_version = subprocess.run(
-                ["cloudflared", "--version"], capture_output=True, text=True, timeout=5
+            ts_version = subprocess.run(
+                ["tailscale", "version"], capture_output=True, text=True, timeout=5
             ).stdout.splitlines()[0]
         except Exception:
-            cf_version = ""
+            ts_version = ""
 
     cs_running, cs_pid = is_alive(run_dir / "code-server.pid")
-    tunnel_running, tunnel_pid = is_alive(run_dir / "tunnel-code.pid")
     bot_running, bot_pid = is_alive(run_dir / "bot.pid")
 
-    tunnel_url = ""
-    tlog = run_dir.parent / "logs" / "tunnel-code.log"
-    if tlog.exists():
-        import re
-        m = re.findall(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", tlog.read_text(errors="ignore"))
-        if m:
-            tunnel_url = m[0]
+    funnel_configured = False
+    tailscale_url = ""
+    if ts_installed:
+        try:
+            fs = subprocess.run(
+                ["tailscale", "funnel", "status"], capture_output=True, text=True, timeout=5
+            ).stdout
+            funnel_configured = "127.0.0.1:8443" in fs
+        except Exception:
+            pass
+        try:
+            st = json.loads(subprocess.run(
+                ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5
+            ).stdout)
+            dns_name = st.get("Self", {}).get("DNSName", "").rstrip(".")
+            if dns_name:
+                tailscale_url = f"https://{dns_name}"
+        except Exception:
+            pass
 
     current_password = read_value(cs_config, "password:")
     current_token = read_value(project_config, "TELEGRAM_BOT_TOKEN:")
@@ -96,11 +111,10 @@ def probe_status(run_dir: Path) -> dict:
         "codeServerVersion": cs_version,
         "codeServerRunning": cs_running,
         "codeServerPid": cs_pid,
-        "cloudflaredInstalled": cf_installed,
-        "cloudflaredVersion": cf_version,
-        "tunnelRunning": tunnel_running,
-        "tunnelPid": tunnel_pid,
-        "tunnelUrl": tunnel_url,
+        "tailscaleInstalled": ts_installed,
+        "tailscaleVersion": ts_version,
+        "funnelConfigured": funnel_configured,
+        "tailscaleUrl": tailscale_url,
         "botRunning": bot_running,
         "botPid": bot_pid,
         "currentPassword": current_password,
