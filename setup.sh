@@ -491,8 +491,18 @@ EOF
             # da xac minh qua xprop). Doi WM_CLASS rieng + StartupWMClass= khop ben duoi
             # de desktop environment dung dung Icon= cua file nay.
             EXEC_LINE="$APP_BROWSER --app=http://localhost:8443 --class=Telecode"
+            STARTUP_WM_CLASS_LINE="StartupWMClass=Telecode"
         else
+            # Fallback: khong tim thay Chrome/Edge/Chromium -> xdg-open mo THANG
+            # trinh duyet mac dinh cua he thong (Firefox, ...), khong phai app-mode.
+            # KHONG duoc dat StartupWMClass=Telecode o day (bug that da gap): cua
+            # so that mo ra mang WM_CLASS cua chinh trinh duyet do (vd "firefox"),
+            # khong khop "Telecode" -> DE (Cinnamon/GNOME) khong nhan dien duoc cua
+            # so that nen giu nguyen icon cua launcher (Icon= o duoi, la icon
+            # Telecode) tren taskbar trong luc/sau khi mo, thay vi tra ve icon that
+            # cua trinh duyet mac dinh.
             EXEC_LINE="xdg-open http://localhost:8443"
+            STARTUP_WM_CLASS_LINE=""
         fi
         cat > "$SHORTCUT" <<EOF
 [Desktop Entry]
@@ -501,7 +511,7 @@ Name=Telecode
 Comment=Telecode by Yan
 Exec=$EXEC_LINE
 Icon=${ICON_FILE:-code}
-StartupWMClass=Telecode
+${STARTUP_WM_CLASS_LINE}
 Terminal=false
 Categories=Development;
 EOF
@@ -760,12 +770,24 @@ echo "6) Token bot Telegram — lấy từ @BotFather (gửi /newbot trên đi�
 BOT_TOKEN="$(ask_value "   Token" "$CURRENT_TOKEN" 1 "token")"
 echo ""
 
+# Mã claim quyền owner — giữ nguyên nếu đã có (tránh vô hiệu mã đã đưa cho người
+# dùng ở lần chạy trước mà họ chưa kịp /start), chỉ sinh mới nếu chưa từng có.
+# Không liên quan tới state.json (owner_chat_id) — mã này chỉ cần lúc CLAIM lần
+# đầu, sau khi đã claim thì state.json là nguồn sự thật, mã cũ hết tác dụng.
+CURRENT_CLAIM_CODE="$(grep '^OWNER_CLAIM_CODE:' "$CONFIG_FILE" 2>/dev/null | sed -E 's/^OWNER_CLAIM_CODE: *"?([^"]*)"?/\1/')"
+if [ -n "$CURRENT_CLAIM_CODE" ]; then
+    OWNER_CLAIM_CODE="$CURRENT_CLAIM_CODE"
+else
+    OWNER_CLAIM_CODE="$(python3 -c "import secrets; print(secrets.token_hex(4))")"
+fi
+
 # --- 7. Ghi config.yaml -------------------------------------------------------
 cat > "$CONFIG_FILE" <<EOF
 TELEGRAM_BOT_TOKEN: "$BOT_TOKEN"
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "$CS_PASSWORD"
 VSCODE_PUBLIC_URL: "$VSCODE_PUBLIC_URL"
+OWNER_CLAIM_CODE: "$OWNER_CLAIM_CODE"
 BOT_POLLING_INTERVAL: 30
 BOT_TIMEOUT: 30
 VSCODE_AUTH_REQUIRED: true
@@ -775,6 +797,18 @@ ENABLE_DEBUG_MODE: false
 ALLOW_MULTIPLE_CONNECTIONS: false
 EOF
 ok "Đã ghi $CONFIG_FILE"
+STATE_FILE="$DIR/state.json"
+OWNER_ALREADY_SET="$(python3 -c "
+import json
+try:
+    with open('$STATE_FILE') as f:
+        print(json.load(f).get('owner_chat_id') is not None)
+except Exception:
+    print(False)
+")"
+if [ "$OWNER_ALREADY_SET" != "True" ]; then
+    info "   👉 Bot chưa có chủ sở hữu — gửi trên Telegram: /start $OWNER_CLAIM_CODE (đúng 1 lần đầu tiên) để nhận quyền."
+fi
 echo ""
 
 # --- 7b. Khôi phục cấu hình AI tool (claude/copilot/gemini/deepseek) qua Telegram --

@@ -14,6 +14,14 @@ VSCODE_PASSWORD: "your-secure-password"
 # Get this from Cloudflare Tunnel or Ngrok after running it
 VSCODE_PUBLIC_URL: "https://your-tunnel-name.trycloudflare.com"
 
+# Mã claim quyền chủ sở hữu 1 lần — sinh tự động bởi setup.sh (giữ nguyên qua các
+# lần chạy lại tới khi đã claim). Người dùng đầu tiên gửi "/start <mã này>" cho bot
+# sẽ được ghi nhận vào state.json (owner_chat_id) làm chủ sở hữu duy nhất; mọi
+# lệnh khác (bao gồm /start sau đó) chỉ trả lời đúng chat_id này. Chống race
+# condition "ai /start trước làm chủ" nếu bot username/token vô tình lộ ra trước
+# khi chủ thật kịp bấm /start lần đầu.
+OWNER_CLAIM_CODE: "generated-by-setup-sh"
+
 # Mini App Configuration
 # Where the mini_app.html is hosted
 # For testing locally: http://localhost:8000/mini_app.html

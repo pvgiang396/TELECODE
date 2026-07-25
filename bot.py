@@ -60,6 +60,10 @@ except FileNotFoundError:
 
 TELEGRAM_BOT_TOKEN = CONFIG.get('TELEGRAM_BOT_TOKEN')
 VSCODE_PUBLIC_URL = CONFIG.get('VSCODE_PUBLIC_URL', 'http://localhost:8443')
+# Mã claim quyền owner 1 lần, sinh bởi setup.sh — bắt buộc để chống race condition
+# "ai /start trước làm chủ" (bug thật: bot token/username lộ ra trước khi chủ thật
+# bấm /start lần đầu thì kẻ tấn công tự nhận owner, dùng được /backup_configs).
+OWNER_CLAIM_CODE = CONFIG.get('OWNER_CLAIM_CODE')
 
 if not TELEGRAM_BOT_TOKEN:
     logger.error("❌ TELEGRAM_BOT_TOKEN not found in config or environment")
@@ -138,16 +142,30 @@ async def discover_alive_servers() -> list[tuple[str, str]]:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Start command handler — ghi nhận chủ sở hữu lần đầu, health-check các máy
-    trong tailnet rồi trả về nút/inline keyboard mở đúng (những) máy đang online."""
+    """Start command handler — bot cá nhân 1 chủ sở hữu duy nhất:
+    - Chưa ai claim owner: bắt buộc /start <mã-claim> (in ra lúc chạy setup.sh) mới
+      được ghi nhận owner_chat_id. Không còn kiểu "ai /start trước làm chủ" (race
+      condition thật: bot token/username lộ ra trước khi chủ thật bấm /start lần
+      đầu thì kẻ tấn công tự nhận owner, dùng được /backup_configs).
+    - Đã có owner: chỉ đúng owner mới nhận được URL/danh sách máy online — người
+      khác nhắn bot nhận từ chối chung chung (không lộ VSCODE_PUBLIC_URL)."""
     user = update.message.from_user
     logger.info(f"👤 User started bot: {user.first_name} (@{user.username})")
 
     state = load_state()
     if state.get("owner_chat_id") is None:
+        if not OWNER_CLAIM_CODE or not context.args or context.args[0] != OWNER_CLAIM_CODE:
+            await update.message.reply_text(
+                "🔒 Bot chưa được xác nhận chủ sở hữu.\n"
+                "Dùng: /start <mã-claim> (mã in ra lúc chạy setup.sh trên máy cài telecode)."
+            )
+            return
         state["owner_chat_id"] = update.effective_chat.id
         save_state(state)
-        logger.info(f"✅ Đã ghi nhận chủ sở hữu: chat_id={update.effective_chat.id}")
+        logger.info(f"✅ Đã xác nhận chủ sở hữu: chat_id={update.effective_chat.id}")
+    elif not is_owner(update):
+        await update.message.reply_text("⛔ Bot này chỉ phục vụ chủ sở hữu.")
+        return
 
     alive = await discover_alive_servers()
 
@@ -214,6 +232,9 @@ async def backup_configs_command(update: Update, context: ContextTypes.DEFAULT_T
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Help command handler"""
+    if not is_owner(update):
+        await update.message.reply_text("⛔ Bot này chỉ phục vụ chủ sở hữu.")
+        return
     help_text = (
         "🔧 *VS Code Mini App - Help*\n\n"
         "*Commands:*\n"
@@ -233,8 +254,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Status command handler - check connection status"""
+    if not is_owner(update):
+        await update.message.reply_text("⛔ Bot này chỉ phục vụ chủ sở hữu.")
+        return
     import aiohttp
-    
+
     status_message = "🔍 *Connection Status*\n\n"
     
     # Check Telegram connection
@@ -260,6 +284,9 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Info command - show project information"""
+    if not is_owner(update):
+        await update.message.reply_text("⛔ Bot này chỉ phục vụ chủ sở hữu.")
+        return
     info_text = (
         "ℹ️ *VS Code Mini App*\n\n"
         "📌 Project: Telegram Mini App for VS Code Control\n"
