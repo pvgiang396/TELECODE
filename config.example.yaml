@@ -5,6 +5,11 @@
 # Get from @BotFather on Telegram
 TELEGRAM_BOT_TOKEN: "YOUR_BOT_TOKEN_HERE"
 
+# OPENAI_API_KEY dùng cho Codex CLI extension (openai.chatgpt) qua 9Router (Gemini)
+# — để trống (giữ giá trị mặc định bên dưới) nếu chưa dùng, setup.sh sẽ bỏ qua
+# bước cài Codex. base_url/model của 9Router cố định, ghi thẳng trong setup.sh.
+OPENAI_API_KEY: "YOUR_OPENAI_API_KEY_HERE"
+
 # VS Code Server Configuration
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "your-secure-password"

@@ -124,6 +124,10 @@ def probe_status(run_dir: Path) -> dict:
     if current_token == "YOUR_BOT_TOKEN_HERE":
         current_token = ""
 
+    current_openai_key = read_value(project_config, "OPENAI_API_KEY:")
+    if current_openai_key == "YOUR_OPENAI_API_KEY_HERE":
+        current_openai_key = ""
+
     return {
         "codeServerInstalled": cs_installed,
         "codeServerVersion": cs_version,
@@ -137,6 +141,7 @@ def probe_status(run_dir: Path) -> dict:
         "botPid": bot_pid,
         "currentPassword": current_password,
         "currentToken": current_token,
+        "currentOpenaiApiKey": current_openai_key,
     }
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Sao lưu cấu hình AI CLI tool (Claude Code / GitHub Copilot / Gemini CLI / DeepSeek)
+# Sao lưu cấu hình AI CLI tool (Claude Code / GitHub Copilot / Gemini CLI / DeepSeek / Codex CLI)
 # thành 1 file .tar.gz.gpg mã hoá AES256 — dùng bởi lệnh /backup_configs trong bot.py.
 #
 # Passphrase đọc qua STDIN (KHÔNG qua argv) — tránh lộ qua `ps aux` cho user khác
@@ -32,6 +32,9 @@ add_if_exists "$HOME/.gemini/google_accounts.json"
 add_if_exists "$HOME/.gemini/installation_id"
 # DeepSeek — không có CLI login riêng, chỉ 1 file env nếu user tự tạo
 add_if_exists "$HOME/.telecode-deepseek.env"
+# Codex CLI (extension openai.chatgpt, dùng qua 9Router)
+add_if_exists "$HOME/.codex/config.toml"
+add_if_exists "$HOME/.codex/auth.json"
 
 if [ "${#FILES[@]}" -eq 0 ]; then
     echo "Không tìm thấy file cấu hình AI tool nào trên máy này (chưa đăng nhập claude/gh copilot/gemini?)." >&2

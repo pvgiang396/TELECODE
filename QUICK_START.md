@@ -40,9 +40,12 @@ nano config.yaml  # Chỉnh sửa với token
 **Chỉnh sửa config.yaml:**
 ```yaml
 TELEGRAM_BOT_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"  # Token từ BotFather
+OPENAI_API_KEY: ""  # Tuỳ chọn — điền để setup.sh tự cài Codex CLI extension (qua 9Router/Gemini), để trống nếu chưa dùng
 VSCODE_PUBLIC_URL: "http://localhost:8443"  # Tạm thời (sẽ update sau)
 MINI_APP_URL: "http://localhost:8000/mini_app.html"  # Development
 ```
+
+> Lưu ý: cách setup thủ công từng bước ở file này (cloudflared, chạy `bot.py` tay...) đã cũ — cách khuyến nghị hiện tại là chạy thẳng `bash setup.sh` (xem README.md), script sẽ tự hỏi/cài mọi thứ kể cả bước Codex CLI này.
 
 ## 4️⃣ Cài đặt Code-Server
 

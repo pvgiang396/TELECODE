@@ -770,6 +770,50 @@ echo "6) Token bot Telegram — lấy từ @BotFather (gửi /newbot trên đi�
 BOT_TOKEN="$(ask_value "   Token" "$CURRENT_TOKEN" 1 "token")"
 echo ""
 
+# --- 6b. Codex CLI (Gemini qua 9Router) --------------------------------------
+# openai.chatgpt (Codex) có sẵn trên Open VSX (marketplace mặc định code-server)
+# -> cài thẳng bằng --install-extension, không cần install_vsix_extension() (hàm
+# đó chỉ dành cho extension chỉ có trên VS Marketplace như Copilot). base_url/
+# model/wire_api cố định (9Router dùng chung của team) -> chỉ hỏi OPENAI_API_KEY.
+CURRENT_OPENAI_KEY="$(grep '^OPENAI_API_KEY:' "$CONFIG_FILE" 2>/dev/null | sed -E 's/^OPENAI_API_KEY: *"?([^"]*)"?/\1/')"
+[ "$CURRENT_OPENAI_KEY" = "YOUR_OPENAI_API_KEY_HERE" ] && CURRENT_OPENAI_KEY=""
+echo "6b) Codex CLI qua 9Router (Gemini) — để trống nếu chưa dùng, có thể bổ sung ở lần chạy setup.sh sau."
+OPENAI_API_KEY="$(ask_value "   OPENAI_API_KEY" "$CURRENT_OPENAI_KEY" 1 "openaiApiKey")"
+if [ -n "$OPENAI_API_KEY" ]; then
+    echo "$INSTALLED_EXT" | grep -q '^openai\.chatgpt$' || {
+        info "   Đang cài extension Codex (openai.chatgpt)..."
+        if code-server --install-extension openai.chatgpt --force; then
+            ok "   Đã cài openai.chatgpt"
+        else
+            warn "   Cài openai.chatgpt thất bại — chạy lại setup.sh sau để thử lại."
+        fi
+    }
+    mkdir -p "$HOME/.codex"
+    cat > "$HOME/.codex/config.toml" <<EOF
+model = "9router"
+model_provider = "9router"
+
+[model_providers.9router]
+name = "9Router"
+base_url = "https://r8mbsct.abc-tunnel.us/v1"
+wire_api = "responses"
+
+[agents.subagent]
+model = "9router"
+EOF
+    cat > "$HOME/.codex/auth.json" <<EOF
+{
+  "auth_mode": "apikey",
+  "OPENAI_API_KEY": "$OPENAI_API_KEY"
+}
+EOF
+    chmod 600 "$HOME/.codex/auth.json"
+    ok "   Đã ghi ~/.codex/config.toml + auth.json."
+else
+    info "   Bỏ qua Codex CLI (chưa có OPENAI_API_KEY)."
+fi
+echo ""
+
 # Mã claim quyền owner — giữ nguyên nếu đã có (tránh vô hiệu mã đã đưa cho người
 # dùng ở lần chạy trước mà họ chưa kịp /start), chỉ sinh mới nếu chưa từng có.
 # Không liên quan tới state.json (owner_chat_id) — mã này chỉ cần lúc CLAIM lần
@@ -784,6 +828,7 @@ fi
 # --- 7. Ghi config.yaml -------------------------------------------------------
 cat > "$CONFIG_FILE" <<EOF
 TELEGRAM_BOT_TOKEN: "$BOT_TOKEN"
+OPENAI_API_KEY: "$OPENAI_API_KEY"
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "$CS_PASSWORD"
 VSCODE_PUBLIC_URL: "$VSCODE_PUBLIC_URL"
@@ -816,8 +861,8 @@ echo ""
 # qua bước này) — không có API nào để bot tự "kéo" file 1 instance khác đã gửi vào
 # chat (Telegram không cho bot đọc lịch sử chat), nên vẫn cần 1 bước tay: người dùng
 # tải file .gpg Telegram gửi về rồi chạy 1 lệnh curl in sẵn để đẩy sang máy này.
-if [ ! -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$HOME/.config/github-copilot/oauth.json" ] && [ ! -f "$HOME/.gemini/oauth_creds.json" ]; then
-    echo "7b) Chưa thấy cấu hình AI tool (claude/copilot/gemini) nào trên máy này."
+if [ ! -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$HOME/.config/github-copilot/oauth.json" ] && [ ! -f "$HOME/.gemini/oauth_creds.json" ] && [ ! -f "$HOME/.codex/auth.json" ]; then
+    echo "7b) Chưa thấy cấu hình AI tool (claude/copilot/gemini/codex) nào trên máy này."
     read -rp "    Khôi phục từ bản sao lưu qua Telegram? (y/N): " RESTORE_ANSWER < /dev/tty
     if [ "$RESTORE_ANSWER" = "y" ] || [ "$RESTORE_ANSWER" = "Y" ]; then
         RECV_PORT=10099
@@ -865,7 +910,7 @@ if [ ! -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$HOME/.config/github-co
                     # nhưng đề phòng umask máy đích khác máy nguồn).
                     chmod 600 "$HOME/.claude/.credentials.json" "$HOME/.claude.json" \
                         "$HOME/.config/gh/hosts.yml" "$HOME/.config/github-copilot/oauth.json" \
-                        "$HOME/.gemini/oauth_creds.json" 2>/dev/null || true
+                        "$HOME/.gemini/oauth_creds.json" "$HOME/.codex/auth.json" 2>/dev/null || true
                     ok "Đã khôi phục cấu hình AI tool."
                 else
                     err "Giải mã thất bại — sai passphrase? File mã hoá còn ở $RECV_OUT, thử lại tay: gpg --decrypt -o out.tar.gz $RECV_OUT"

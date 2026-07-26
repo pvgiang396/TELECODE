@@ -43,6 +43,8 @@ Lệnh trên tự clone repo về `~/telecode` (hoặc `$TELECODE_DIR` nếu b�
 
 Cần chuẩn bị trước: token bot Telegram từ [@BotFather](https://t.me/BotFather) (gửi `/newbot` trên điện thoại).
 
+Tuỳ chọn: nhập thêm `OPENAI_API_KEY` (bước 6b) để `setup.sh` tự cài + cấu hình sẵn Codex CLI extension trong VS Code, dùng qua "9Router" (proxy OpenAI-compatible trỏ Gemini) — không cần tự cài extension/dán file cấu hình tay. Để trống nếu chưa dùng, có thể chạy lại `setup.sh` sau để bổ sung.
+
 Đây là repo **public** (ai cũng curl/clone được) nhưng chỉ chủ tài khoản GitLab mới push được — dùng để cài, không dùng để đóng góp code.
 
 ### Cách thủ công (nếu muốn kiểm soát từng bước)

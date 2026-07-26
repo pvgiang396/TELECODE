@@ -148,6 +148,15 @@ fetch('/api/status').then(r => r.json()).then(s => {
     <div class="hint">${s.currentToken ? 'Đã có token đã lưu, để nguyên là giữ token cũ.' : 'Chưa có token, bắt buộc nhập.'}</div>
   </div>`;
 
+  html += `<div class="step">
+    <h2>Codex CLI qua 9Router (Gemini) — tuỳ chọn</h2>
+    <div class="pw-wrap">
+      <input type="password" id="openaiApiKey" name="openaiApiKey" value="${s.currentOpenaiApiKey || ''}" placeholder="OPENAI_API_KEY (để trống nếu chưa dùng)">
+      <button type="button" id="toggleOpenaiApiKey">👁</button>
+    </div>
+    <div class="hint">${s.currentOpenaiApiKey ? 'Đã có key đã lưu, để nguyên là giữ key cũ.' : 'Để trống = bỏ qua, có thể bổ sung sau bằng cách chạy lại wizard.'}</div>
+  </div>`;
+
   if (s.botRunning) {
     html += radioGroup('botAction', 'Bot Telegram', `đang chạy (PID ${s.botPid})`);
   }
@@ -165,6 +174,10 @@ fetch('/api/status').then(r => r.json()).then(s => {
   document.getElementById('toggleToken').addEventListener('click', () => {
     const t = document.getElementById('token');
     t.type = t.type === 'password' ? 'text' : 'password';
+  });
+  document.getElementById('toggleOpenaiApiKey').addEventListener('click', () => {
+    const k = document.getElementById('openaiApiKey');
+    k.type = k.type === 'password' ? 'text' : 'password';
   });
 
   form.addEventListener('submit', (e) => {
