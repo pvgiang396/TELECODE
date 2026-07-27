@@ -65,9 +65,10 @@ VSCODE_PUBLIC_URL = CONFIG.get('VSCODE_PUBLIC_URL', 'http://localhost:8443')
 # "ai /start trước làm chủ" (bug thật: bot token/username lộ ra trước khi chủ thật
 # bấm /start lần đầu thì kẻ tấn công tự nhận owner, dùng được /backup_configs).
 OWNER_CLAIM_CODE = CONFIG.get('OWNER_CLAIM_CODE')
-# Thư mục nhận ảnh gửi qua Telegram — mặc định là chính thư mục cài telecode (nơi
-# bot.py đang chạy), đổi được ở bước 6d của setup.sh / field tương ứng trong wizard.
-PHOTO_INBOX_DIR = CONFIG.get('PHOTO_INBOX_DIR') or str(Path(__file__).parent)
+# Thư mục nhận file gửi qua Telegram — mặc định là thư mục con "files" trong thư
+# mục cài telecode (không phải chính $DIR — tránh trộn lẫn với source code thực
+# thi), đổi được ở bước 6d của setup.sh / field tương ứng trong wizard.
+FILE_INBOX_DIR = CONFIG.get('FILE_INBOX_DIR') or str(Path(__file__).parent / "files")
 
 if not TELEGRAM_BOT_TOKEN:
     logger.error("❌ TELEGRAM_BOT_TOKEN not found in config or environment")
@@ -304,27 +305,43 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     await update.message.reply_text(info_text, parse_mode='Markdown')
 
-async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Nhận ảnh gửi trong chat (kể cả kèm caption) và tự lưu vào PHOTO_INBOX_DIR
-    trên máy chạy bot.py — cách để đồng bộ ảnh chụp từ điện thoại về máy tính khi
-    làm việc từ xa qua telecode, không cần cài thêm app đồng bộ riêng."""
+async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Nhận file gửi trong chat (ảnh nén qua message.photo HOẶC file gốc/mọi định
+    dạng qua message.document — Telegram tách 2 kiểu này) và tự lưu vào
+    FILE_INBOX_DIR trên máy chạy bot.py — cách để đồng bộ file từ điện thoại về
+    máy tính khi làm việc từ xa qua telecode, không cần cài thêm app đồng bộ riêng.
+    Ảnh gửi kiểu "Photo" (nén, mất EXIF/chất lượng gốc) chỉ có tối đa độ phân giải
+    Telegram nén sẵn — muốn giữ nguyên file gốc, gửi kiểu "File"/"Document" trên
+    Telegram thay vì chọn ảnh qua khung chat thường."""
     if not is_owner(update):
         await update.message.reply_text("⛔ Bot này chỉ phục vụ chủ sở hữu.")
         return
 
-    photo = update.message.photo[-1]  # phần tử cuối cùng = độ phân giải cao nhất
+    message = update.message
+    if message.document:
+        tg_file_id = message.document.file_id
+        original_name = message.document.file_name or message.document.file_unique_id
+        suffix = ""
+    elif message.photo:
+        photo = message.photo[-1]  # phần tử cuối cùng = độ phân giải cao nhất
+        tg_file_id = photo.file_id
+        original_name = photo.file_unique_id
+        suffix = ".jpg"
+    else:
+        return
+
     try:
-        file = await context.bot.get_file(photo.file_id)
-        dest_dir = Path(PHOTO_INBOX_DIR)
+        file = await context.bot.get_file(tg_file_id)
+        dest_dir = Path(FILE_INBOX_DIR)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{datetime.now():%Y%m%d-%H%M%S}-{photo.file_unique_id}.jpg"
+        filename = f"{datetime.now():%Y%m%d-%H%M%S}-{original_name}{suffix}"
         dest_path = dest_dir / filename
         await file.download_to_drive(str(dest_path))
-        logger.info(f"📸 Đã lưu ảnh từ Telegram: {dest_path}")
-        await update.message.reply_text(f"✅ Đã lưu ảnh vào: {dest_path}")
+        logger.info(f"📥 Đã lưu file từ Telegram: {dest_path}")
+        await update.message.reply_text(f"✅ Đã lưu file vào: {dest_path}")
     except Exception as e:
-        logger.error(f"❌ Lỗi lưu ảnh: {e}")
-        await update.message.reply_text(f"❌ Lỗi khi lưu ảnh: {e}")
+        logger.error(f"❌ Lỗi lưu file: {e}")
+        await update.message.reply_text(f"❌ Lỗi khi lưu file: {e}")
 
 
 async def post_init(application: Application) -> None:
@@ -358,7 +375,7 @@ def main() -> None:
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("info", info_command))
     application.add_handler(CommandHandler("backup_configs", backup_configs_command))
-    application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, file_handler))
 
     # Log bot info
     logger.info("="*50)

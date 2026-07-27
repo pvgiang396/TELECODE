@@ -168,9 +168,9 @@ fetch('/api/status').then(r => r.json()).then(s => {
   </div>`;
 
   html += `<div class="step">
-    <h2>Thư mục nhận ảnh gửi qua Telegram</h2>
-    <input type="text" id="photoInboxDir" name="photoInboxDir" value="${s.currentPhotoInboxDir || ''}" placeholder="Đường dẫn thư mục" required>
-    <div class="hint">Ảnh chụp gửi thẳng cho bot (chat riêng) sẽ tự lưu vào đây trên máy này. Mặc định là thư mục cài telecode.</div>
+    <h2>Thư mục nhận ảnh/file gửi qua Telegram</h2>
+    <input type="text" id="fileInboxDir" name="fileInboxDir" value="${s.currentFileInboxDir || ''}" placeholder="Đường dẫn thư mục" required>
+    <div class="hint">Ảnh hoặc file bất kỳ gửi thẳng cho bot (chat riêng) sẽ tự lưu vào đây trên máy này. Mặc định là thư mục con "files" trong thư mục cài telecode.</div>
   </div>`;
 
   if (s.botRunning) {
