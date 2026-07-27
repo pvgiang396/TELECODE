@@ -169,6 +169,12 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
     wizard_html = (dir_ / "assets" / "wizard.html").read_text(encoding="utf-8")
     icon_path = dir_ / "assets" / "icon.png"
     icon_bytes = icon_path.read_bytes() if icon_path.exists() else b""
+    pat_guide_path = dir_ / "assets" / "pat-guide.html"
+    pat_guide_html = pat_guide_path.read_text(encoding="utf-8") if pat_guide_path.exists() else ""
+    pat_guide_img1 = (dir_ / "assets" / "pat-guide-1.jpg")
+    pat_guide_img1_bytes = pat_guide_img1.read_bytes() if pat_guide_img1.exists() else b""
+    pat_guide_img2 = (dir_ / "assets" / "pat-guide-2.jpg")
+    pat_guide_img2_bytes = pat_guide_img2.read_bytes() if pat_guide_img2.exists() else b""
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -201,6 +207,25 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
                 self.send_header("Content-Length", str(len(icon_bytes)))
                 self.end_headers()
                 self.wfile.write(icon_bytes)
+            elif self.path == "/pat-guide.html" and pat_guide_html:
+                body = pat_guide_html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path == "/pat-guide-1.jpg" and pat_guide_img1_bytes:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(pat_guide_img1_bytes)))
+                self.end_headers()
+                self.wfile.write(pat_guide_img1_bytes)
+            elif self.path == "/pat-guide-2.jpg" and pat_guide_img2_bytes:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(pat_guide_img2_bytes)))
+                self.end_headers()
+                self.wfile.write(pat_guide_img2_bytes)
             else:
                 self._send_json(404, {"error": "not found"})
 

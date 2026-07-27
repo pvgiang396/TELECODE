@@ -108,3 +108,4 @@ env*/
 .mypy_cache/
 .coverage
 htmlcov/
+error_missing_copilot/

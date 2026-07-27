@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Hướng dẫn tạo GitHub PAT cho Copilot CLI</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px; min-height: 100vh;
+    background: #1e1e1e; color: #e5e5e5;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #9a9a9a; font-size: 13px; margin-bottom: 20px; }
+  .step {
+    background: #252526; border: 1px solid #3c3c3c; border-radius: 8px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .step h2 { font-size: 14px; margin: 0 0 8px; color: #cfcfcf; }
+  .step p { font-size: 13px; color: #cfcfcf; margin: 0 0 10px; line-height: 1.5; }
+  .step p b { color: #fff; }
+  .step img { width: 100%; border-radius: 6px; border: 1px solid #3c3c3c; display: block; }
+  code { background: #1e1e1e; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>Hướng dẫn tạo GitHub PAT cho Copilot CLI</h1>
+  <div class="sub">Dùng cho mục "GitHub Copilot CLI (agent 'Copilot CLI' trong Gemini)" ở wizard cài đặt telecode.</div>
+
+  <div class="step">
+    <h2>Bước 1 — Điền thông tin token</h2>
+    <p>Đặt <b>Token name</b> dễ nhận biết (vd <code>telecode</code>), <b>Description</b> tuỳ chọn, chọn đúng <b>Resource owner</b> là tài khoản GitHub của bạn, và đặt <b>Expiration</b>.</p>
+    <img src="/pat-guide-1.jpg" alt="Bước 1 - điền thông tin token" />
+  </div>
+
+  <div class="step">
+    <h2>Bước 2 — Bật quyền "Copilot Requests"</h2>
+    <p>Giữ nguyên <b>Repository access = Public repositories</b> (không cần đổi). Quyền cần bật nằm ở khối <b>Account</b> phía dưới (không phải Repository access) — bấm <b>"+ Add permissions"</b>, chọn <b>"Copilot Requests"</b>, rồi bấm <b>"Generate token"</b>.</p>
+    <img src="/pat-guide-2.jpg" alt="Bước 2 - bật quyền Copilot Requests" />
+  </div>
+
+  <div class="step">
+    <p style="margin:0">Sau khi có token, copy và dán vào ô "GitHub Copilot CLI" trong wizard cài đặt.</p>
+  </div>
+
+<script>
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+</script>
+</body>
+</html>

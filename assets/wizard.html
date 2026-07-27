@@ -31,6 +31,7 @@
   }
   input:focus { outline: 2px solid #3f83f8; }
   .hint { font-size: 12px; color: #8a8a8a; margin-top: 6px; }
+  .hint a { color: #3f83f8; }
   .pw-wrap { position: relative; }
   .pw-wrap button {
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
@@ -163,7 +164,7 @@ fetch('/api/status').then(r => r.json()).then(s => {
       <input type="password" id="githubCopilotPat" name="githubCopilotPat" value="${s.currentGithubCopilotPat || ''}" placeholder="PAT quyền &quot;Copilot Requests&quot; (để trống nếu chưa dùng)">
       <button type="button" id="toggleGithubCopilotPat">👁</button>
     </div>
-    <div class="hint">${s.currentGithubCopilotPat ? 'Đã có PAT đã lưu, để nguyên là giữ PAT cũ.' : 'Tạo tại github.com/settings/personal-access-tokens/new, bật quyền "Copilot Requests". Để trống = bỏ qua.'}</div>
+    <div class="hint">${s.currentGithubCopilotPat ? 'Đã có PAT đã lưu, để nguyên là giữ PAT cũ.' : 'Tạo tại <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>, bật quyền "Copilot Requests", <a href="/pat-guide.html" onclick="window.open(\'/pat-guide.html\',\'patGuide\',\'noopener,noreferrer,width=900,height=750,menubar=no,toolbar=no,location=no,status=no\'); return false;">Click vào đây</a> để xem hướng dẫn cách tạo token. Để trống = bỏ qua.'}</div>
   </div>`;
 
   if (s.botRunning) {
