@@ -150,6 +150,14 @@ stop_pid() { # stop_pid <pidfile>
 OS="linux"
 [ "$(uname -s)" = "Darwin" ] && OS="mac"
 
+# Dùng chung cho cả code-server (bước 3) và bot (bước 9) — Linux có systemd --user
+# thật sự dùng được thì ưu tiên (Restart=always tự hồi sinh khi crash vì bất kỳ lý
+# do gì); macOS/máy không có thì các bước liên quan tự fallback nohup.
+USE_SYSTEMD=0
+if [ "$OS" = "linux" ] && command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+    USE_SYSTEMD=1
+fi
+
 ANSWERS_FILE="$RUN_DIR/wizard-answers.json"
 
 # --- GUI wizard: thay hỏi từng bước qua terminal bằng 1 trang web ------------
@@ -653,22 +661,95 @@ if [ ! -d "$CODE_SERVER_WORKSPACE" ]; then
     CODE_SERVER_WORKSPACE="$HOME"
 fi
 
+# Ưu tiên systemd --user (giống bot ở bước 9) thay vì nohup trần — bug thật đã gặp:
+# gói .deb code-server cài kèm sẵn 1 unit systemd --user riêng (/usr/lib/systemd/
+# user/code-server.service, Restart=always, WantedBy=default.target) tự bật sẵn ở
+# nhiều máy, TRANH NHAU quản lý cùng 1 code-server với tiến trình nohup cũ của
+# setup.sh (cả 2 đọc chung config.yaml nên khó nhận ra là 2 cơ chế khác nhau) — mỗi
+# lần máy reboot/logout/crash, systemd tự spin lên 1 process HOÀN TOÀN MỚI, làm mất
+# sạch session GitHub Copilot/Gemini đã đăng nhập (đã xác nhận package.json code-
+# server KHÔNG có dependency "keytar" — SecretStorage chỉ giữ trong bộ nhớ tiến
+# trình, không có backend keyring/libsecret nào cứu được dù gnome-keyring-daemon có
+# đang chạy sẵn trên máy hay không — xem thêm telecode/CLAUDE.md). Ghi unit của ta
+# vào $HOME/.config/systemd/user/code-server.service — theo thứ tự tìm unit của
+# systemd, file này ĐÈ hẳn lên bản /usr/lib/systemd/user cùng tên, không cần mask/
+# disable riêng bản vendor.
 CS_PID="$RUN_DIR/code-server.pid"
-if [ "$CS_PASSWORD" != "$CURRENT_PW" ] && is_alive "$CS_PID"; then
+CS_SERVICE="code-server"
+CS_UNIT_FILE="$HOME/.config/systemd/user/${CS_SERVICE}.service"
+# GH_TOKEN cho "Copilot CLI" (agent Gemini spawn ra tiến trình copilot con — xem
+# Bước 6c) — tách riêng khỏi unit qua EnvironmentFile= để đổi PAT không cần viết
+# lại unit, chỉ cần restart. Không tồn tại thì code-server vẫn chạy bình thường
+# (dấu "-" trước đường dẫn trong EnvironmentFile=).
+CS_ENV_FILE="$RUN_DIR/code-server.env"
+
+is_code_server_alive() {
+    if [ "$USE_SYSTEMD" = "1" ]; then
+        systemctl --user is-active --quiet "$CS_SERVICE"
+    else
+        is_alive "$CS_PID"
+    fi
+}
+
+start_code_server() {
+    if [ "$USE_SYSTEMD" = "1" ]; then
+        mkdir -p "$(dirname "$CS_UNIT_FILE")"
+        cat > "$CS_UNIT_FILE" <<EOF
+[Unit]
+Description=code-server (telecode)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-$CS_ENV_FILE
+ExecStart=$(command -v code-server) --bind-addr 127.0.0.1:8443 $CODE_SERVER_WORKSPACE
+Restart=always
+RestartSec=3
+StandardOutput=append:$LOG_DIR/code-server.log
+StandardError=append:$LOG_DIR/code-server.log
+
+[Install]
+WantedBy=default.target
+EOF
+        systemctl --user daemon-reload
+        systemctl --user enable --now "$CS_SERVICE" >/dev/null 2>&1
+        sleep 2
+        if ! is_code_server_alive; then
+            err "code-server (systemd) khởi động thất bại — xem: journalctl --user -u $CS_SERVICE -n 50 --no-pager"
+            exit 1
+        fi
+        # Ghi PID thật để tương thích ngược với wizard.py cũ/hiển thị — lỗi thời
+        # ngay sau lần Restart=always kế tiếp, không dùng để quyết định alive.
+        systemctl --user show "$CS_SERVICE" -p MainPID --value > "$CS_PID"
+    else
+        ( set -a; [ -f "$CS_ENV_FILE" ] && . "$CS_ENV_FILE"; set +a
+          nohup code-server --bind-addr 127.0.0.1:8443 "$CODE_SERVER_WORKSPACE" > "$LOG_DIR/code-server.log" 2>&1 & echo $! > "$CS_PID" )
+        sleep 2
+    fi
+}
+
+stop_code_server() {
+    if [ "$USE_SYSTEMD" = "1" ]; then systemctl --user stop "$CS_SERVICE"; else stop_pid "$CS_PID"; fi
+}
+
+if [ "$CS_PASSWORD" != "$CURRENT_PW" ] && is_code_server_alive; then
     # code-server chỉ đọc config.yaml lúc khởi động — đổi mật khẩu mà không restart
     # thì tiến trình cũ vẫn dùng mật khẩu cũ trong bộ nhớ, gõ mật khẩu mới sẽ luôn sai.
     warn "Mật khẩu vừa đổi — bắt buộc khởi động lại code-server để áp dụng."
-    stop_pid "$CS_PID"
-elif is_alive "$CS_PID"; then
-    if [ "$(ask_choice "3) code-server: đang chạy (PID $(cat "$CS_PID"))" "codeServerRunAction")" = "redo" ]; then
-        stop_pid "$CS_PID"
+    stop_code_server
+elif is_code_server_alive; then
+    if [ "$(ask_choice "3) code-server: đang chạy" "codeServerRunAction")" = "redo" ]; then
+        stop_code_server
     fi
 fi
-if ! is_alive "$CS_PID"; then
-    nohup code-server --bind-addr 127.0.0.1:8443 "$CODE_SERVER_WORKSPACE" > "$LOG_DIR/code-server.log" 2>&1 &
-    echo $! > "$CS_PID"
-    sleep 2
-    ok "code-server đang chạy tại http://localhost:8443, thư mục: $CODE_SERVER_WORKSPACE (PID $(cat "$CS_PID"))"
+if ! is_code_server_alive; then
+    start_code_server
+    ok "code-server đang chạy tại http://localhost:8443, thư mục: $CODE_SERVER_WORKSPACE"
+fi
+if [ "$USE_SYSTEMD" = "1" ]; then
+    ok "code-server chạy qua systemd --user (tự restart nếu crash) — service: $CS_SERVICE"
+else
+    warn "code-server chạy qua nohup — không tự restart nếu crash (cần systemd --user, hiện không khả dụng trên máy này)."
 fi
 echo ""
 
@@ -814,6 +895,42 @@ else
 fi
 echo ""
 
+# --- 6c. GitHub Copilot CLI (PAT) --------------------------------------------
+# Agent "Copilot CLI" trong picker của Gemini Code Assist spawn ra tiến trình con
+# chạy binary `copilot` (npm @github/copilot) — tách biệt hoàn toàn khỏi extension
+# github.copilot/github.copilot-chat (dùng OAuth session chỉ sống trong bộ nhớ
+# tiến trình code-server, mất mỗi lần restart — xem giới hạn đã ghi ở Bước 3).
+# README @github/copilot xác nhận CLI này nhận PAT không tương tác qua biến môi
+# trường GH_TOKEN/GITHUB_TOKEN — vì `copilot` chạy như tiến trình con của chính
+# code-server, chỉ cần PAT có mặt trong environment của code-server (ghi vào
+# $CS_ENV_FILE, nạp qua EnvironmentFile= ở Bước 3) là đủ, không cần đụng gì tới
+# Gemini/Copilot extension. Khác Bước 6b: giá trị này KHÔNG ghi ra 1 tool riêng mà
+# ghi thẳng vào $CS_ENV_FILE vì đích đến là environment của code-server.
+CURRENT_GH_COPILOT_PAT="$(grep '^GITHUB_COPILOT_PAT:' "$CONFIG_FILE" 2>/dev/null | sed -E 's/^GITHUB_COPILOT_PAT: *"?([^"]*)"?/\1/')"
+[ "$CURRENT_GH_COPILOT_PAT" = "YOUR_GITHUB_COPILOT_PAT_HERE" ] && CURRENT_GH_COPILOT_PAT=""
+echo "6c) GitHub Copilot CLI (agent 'Copilot CLI' trong Gemini) — tạo PAT tại"
+echo "    https://github.com/settings/personal-access-tokens/new, bật quyền \"Copilot Requests\"."
+echo "    Để trống nếu chưa dùng, có thể bổ sung ở lần chạy setup.sh sau."
+GITHUB_COPILOT_PAT="$(ask_value "   GITHUB_COPILOT_PAT" "$CURRENT_GH_COPILOT_PAT" 1 "githubCopilotPat")"
+if [ -n "$GITHUB_COPILOT_PAT" ]; then
+    CS_ENV_NEW="GH_TOKEN=$GITHUB_COPILOT_PAT"
+    CS_ENV_OLD=""
+    [ -f "$CS_ENV_FILE" ] && CS_ENV_OLD="$(cat "$CS_ENV_FILE")"
+    if [ "$CS_ENV_NEW" != "$CS_ENV_OLD" ]; then
+        echo "$CS_ENV_NEW" > "$CS_ENV_FILE"
+        chmod 600 "$CS_ENV_FILE"
+        if is_code_server_alive; then
+            info "   PAT vừa đổi — khởi động lại code-server để áp dụng."
+            stop_code_server
+            start_code_server
+        fi
+        ok "   Đã ghi $CS_ENV_FILE."
+    fi
+else
+    info "   Bỏ qua Copilot CLI (chưa có GITHUB_COPILOT_PAT)."
+fi
+echo ""
+
 # Mã claim quyền owner — giữ nguyên nếu đã có (tránh vô hiệu mã đã đưa cho người
 # dùng ở lần chạy trước mà họ chưa kịp /start), chỉ sinh mới nếu chưa từng có.
 # Không liên quan tới state.json (owner_chat_id) — mã này chỉ cần lúc CLAIM lần
@@ -829,6 +946,7 @@ fi
 cat > "$CONFIG_FILE" <<EOF
 TELEGRAM_BOT_TOKEN: "$BOT_TOKEN"
 OPENAI_API_KEY: "$OPENAI_API_KEY"
+GITHUB_COPILOT_PAT: "$GITHUB_COPILOT_PAT"
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "$CS_PASSWORD"
 VSCODE_PUBLIC_URL: "$VSCODE_PUBLIC_URL"
@@ -955,10 +1073,8 @@ echo ""
 BOT_PID="$RUN_DIR/bot.pid"
 BOT_SERVICE="telecode-bot"
 BOT_UNIT_FILE="$HOME/.config/systemd/user/${BOT_SERVICE}.service"
-USE_SYSTEMD=0
-if [ "$OS" = "linux" ] && command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
-    USE_SYSTEMD=1
-fi
+# USE_SYSTEMD tính chung 1 lần ở đầu file (ngay sau xác định $OS) — dùng lại cho cả
+# code-server (bước 3) lẫn bot (bước này).
 
 is_bot_alive() {
     if [ "$USE_SYSTEMD" = "1" ]; then

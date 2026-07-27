@@ -10,6 +10,12 @@ TELEGRAM_BOT_TOKEN: "YOUR_BOT_TOKEN_HERE"
 # bước cài Codex. base_url/model của 9Router cố định, ghi thẳng trong setup.sh.
 OPENAI_API_KEY: "YOUR_OPENAI_API_KEY_HERE"
 
+# GITHUB_COPILOT_PAT dùng cho agent "Copilot CLI" trong Gemini Code Assist (tiến
+# trình con `copilot` kế thừa biến GH_TOKEN từ environment của code-server) — fine-
+# grained PAT tạo tại https://github.com/settings/personal-access-tokens/new, bật
+# quyền "Copilot Requests". Để trống nếu chưa dùng, setup.sh sẽ bỏ qua bước này.
+GITHUB_COPILOT_PAT: "YOUR_GITHUB_COPILOT_PAT_HERE"
+
 # VS Code Server Configuration
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "your-secure-password"

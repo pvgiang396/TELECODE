@@ -157,6 +157,15 @@ fetch('/api/status').then(r => r.json()).then(s => {
     <div class="hint">${s.currentOpenaiApiKey ? 'Đã có key đã lưu, để nguyên là giữ key cũ.' : 'Để trống = bỏ qua, có thể bổ sung sau bằng cách chạy lại wizard.'}</div>
   </div>`;
 
+  html += `<div class="step">
+    <h2>GitHub Copilot CLI (agent "Copilot CLI" trong Gemini) — tuỳ chọn</h2>
+    <div class="pw-wrap">
+      <input type="password" id="githubCopilotPat" name="githubCopilotPat" value="${s.currentGithubCopilotPat || ''}" placeholder="PAT quyền &quot;Copilot Requests&quot; (để trống nếu chưa dùng)">
+      <button type="button" id="toggleGithubCopilotPat">👁</button>
+    </div>
+    <div class="hint">${s.currentGithubCopilotPat ? 'Đã có PAT đã lưu, để nguyên là giữ PAT cũ.' : 'Tạo tại github.com/settings/personal-access-tokens/new, bật quyền "Copilot Requests". Để trống = bỏ qua.'}</div>
+  </div>`;
+
   if (s.botRunning) {
     html += radioGroup('botAction', 'Bot Telegram', `đang chạy (PID ${s.botPid})`);
   }
@@ -178,6 +187,10 @@ fetch('/api/status').then(r => r.json()).then(s => {
   document.getElementById('toggleOpenaiApiKey').addEventListener('click', () => {
     const k = document.getElementById('openaiApiKey');
     k.type = k.type === 'password' ? 'text' : 'password';
+  });
+  document.getElementById('toggleGithubCopilotPat').addEventListener('click', () => {
+    const p = document.getElementById('githubCopilotPat');
+    p.type = p.type === 'password' ? 'text' : 'password';
   });
 
   form.addEventListener('submit', (e) => {

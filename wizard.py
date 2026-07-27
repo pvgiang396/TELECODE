@@ -78,11 +78,26 @@ def probe_status(run_dir: Path) -> dict:
         except Exception:
             ts_version = ""
 
+    # setup.sh ưu tiên systemd --user cho cả code-server lẫn bot.py (Restart=always,
+    # tự hồi sinh khi crash) trên Linux có systemd — file PID cũ chỉ còn để tương
+    # thích hiển thị, không phản ánh đúng trạng thái sống/chết sau khi service tự
+    # restart 1 lần. Kiểm tra thẳng qua systemctl nếu unit tồn tại, fallback PID file.
     cs_running, cs_pid = is_alive(run_dir / "code-server.pid")
-    # setup.sh ưu tiên systemd --user cho bot.py (Restart=always, tự hồi sinh khi
-    # crash) trên Linux có systemd — file PID cũ chỉ còn để tương thích hiển thị,
-    # không phản ánh đúng trạng thái sống/chết sau khi service tự restart 1 lần.
-    # Kiểm tra thẳng qua systemctl nếu unit tồn tại, fallback về PID file cũ.
+    if (Path.home() / ".config/systemd/user/code-server.service").exists():
+        try:
+            active = subprocess.run(
+                ["systemctl", "--user", "is-active", "code-server"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            cs_running = active == "active"
+            if cs_running:
+                cs_pid = int(subprocess.run(
+                    ["systemctl", "--user", "show", "code-server", "-p", "MainPID", "--value"],
+                    capture_output=True, text=True, timeout=5,
+                ).stdout.strip() or 0)
+        except Exception:
+            pass
+
     bot_running, bot_pid = is_alive(run_dir / "bot.pid")
     if (Path.home() / ".config/systemd/user/telecode-bot.service").exists():
         try:
@@ -128,6 +143,10 @@ def probe_status(run_dir: Path) -> dict:
     if current_openai_key == "YOUR_OPENAI_API_KEY_HERE":
         current_openai_key = ""
 
+    current_github_copilot_pat = read_value(project_config, "GITHUB_COPILOT_PAT:")
+    if current_github_copilot_pat == "YOUR_GITHUB_COPILOT_PAT_HERE":
+        current_github_copilot_pat = ""
+
     return {
         "codeServerInstalled": cs_installed,
         "codeServerVersion": cs_version,
@@ -142,6 +161,7 @@ def probe_status(run_dir: Path) -> dict:
         "currentPassword": current_password,
         "currentToken": current_token,
         "currentOpenaiApiKey": current_openai_key,
+        "currentGithubCopilotPat": current_github_copilot_pat,
     }
 
 
