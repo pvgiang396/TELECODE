@@ -167,6 +167,12 @@ fetch('/api/status').then(r => r.json()).then(s => {
     <div class="hint">${s.currentGithubCopilotPat ? 'Đã có PAT đã lưu, để nguyên là giữ PAT cũ.' : 'Tạo tại <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>, bật quyền "Copilot Requests", <a href="/pat-guide.html" onclick="window.open(\'/pat-guide.html\',\'patGuide\',\'noopener,noreferrer,width=900,height=750,menubar=no,toolbar=no,location=no,status=no\'); return false;">Click vào đây</a> để xem hướng dẫn cách tạo token. Để trống = bỏ qua.'}</div>
   </div>`;
 
+  html += `<div class="step">
+    <h2>Thư mục nhận ảnh gửi qua Telegram</h2>
+    <input type="text" id="photoInboxDir" name="photoInboxDir" value="${s.currentPhotoInboxDir || ''}" placeholder="Đường dẫn thư mục" required>
+    <div class="hint">Ảnh chụp gửi thẳng cho bot (chat riêng) sẽ tự lưu vào đây trên máy này. Mặc định là thư mục cài telecode.</div>
+  </div>`;
+
   if (s.botRunning) {
     html += radioGroup('botAction', 'Bot Telegram', `đang chạy (PID ${s.botPid})`);
   }

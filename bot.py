@@ -11,9 +11,10 @@ import shutil
 import subprocess
 import tempfile
 import yaml
+from datetime import datetime
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonCommands, MenuButtonWebApp, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # Configure logging
 logging.basicConfig(
@@ -64,6 +65,9 @@ VSCODE_PUBLIC_URL = CONFIG.get('VSCODE_PUBLIC_URL', 'http://localhost:8443')
 # "ai /start trước làm chủ" (bug thật: bot token/username lộ ra trước khi chủ thật
 # bấm /start lần đầu thì kẻ tấn công tự nhận owner, dùng được /backup_configs).
 OWNER_CLAIM_CODE = CONFIG.get('OWNER_CLAIM_CODE')
+# Thư mục nhận ảnh gửi qua Telegram — mặc định là chính thư mục cài telecode (nơi
+# bot.py đang chạy), đổi được ở bước 6d của setup.sh / field tương ứng trong wizard.
+PHOTO_INBOX_DIR = CONFIG.get('PHOTO_INBOX_DIR') or str(Path(__file__).parent)
 
 if not TELEGRAM_BOT_TOKEN:
     logger.error("❌ TELEGRAM_BOT_TOKEN not found in config or environment")
@@ -300,6 +304,29 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     await update.message.reply_text(info_text, parse_mode='Markdown')
 
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Nhận ảnh gửi trong chat (kể cả kèm caption) và tự lưu vào PHOTO_INBOX_DIR
+    trên máy chạy bot.py — cách để đồng bộ ảnh chụp từ điện thoại về máy tính khi
+    làm việc từ xa qua telecode, không cần cài thêm app đồng bộ riêng."""
+    if not is_owner(update):
+        await update.message.reply_text("⛔ Bot này chỉ phục vụ chủ sở hữu.")
+        return
+
+    photo = update.message.photo[-1]  # phần tử cuối cùng = độ phân giải cao nhất
+    try:
+        file = await context.bot.get_file(photo.file_id)
+        dest_dir = Path(PHOTO_INBOX_DIR)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{datetime.now():%Y%m%d-%H%M%S}-{photo.file_unique_id}.jpg"
+        dest_path = dest_dir / filename
+        await file.download_to_drive(str(dest_path))
+        logger.info(f"📸 Đã lưu ảnh từ Telegram: {dest_path}")
+        await update.message.reply_text(f"✅ Đã lưu ảnh vào: {dest_path}")
+    except Exception as e:
+        logger.error(f"❌ Lỗi lưu ảnh: {e}")
+        await update.message.reply_text(f"❌ Lỗi khi lưu ảnh: {e}")
+
+
 async def post_init(application: Application) -> None:
     # MenuButtonWebApp trỏ 1 URL TĨNH — chỉ set được khi biết chắc CHỈ 1 máy
     # online lúc bot khởi động (health-check qua discover_alive_servers(), dùng
@@ -331,7 +358,8 @@ def main() -> None:
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("info", info_command))
     application.add_handler(CommandHandler("backup_configs", backup_configs_command))
-    
+    application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+
     # Log bot info
     logger.info("="*50)
     logger.info("🤖 Telegram VS Code Mini App Bot")

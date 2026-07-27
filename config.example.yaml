@@ -16,6 +16,12 @@ OPENAI_API_KEY: "YOUR_OPENAI_API_KEY_HERE"
 # quyền "Copilot Requests". Để trống nếu chưa dùng, setup.sh sẽ bỏ qua bước này.
 GITHUB_COPILOT_PAT: "YOUR_GITHUB_COPILOT_PAT_HERE"
 
+# PHOTO_INBOX_DIR: thư mục nhận ảnh gửi qua Telegram — chụp ảnh gửi thẳng cho bot
+# (chat riêng, chỉ chủ sở hữu) sẽ tự tải và lưu vào đây, để đồng bộ ảnh từ điện
+# thoại về máy tính khi làm việc từ xa. Mặc định là chính thư mục cài telecode,
+# hỏi lại (đổi được) ở bước 6d khi chạy setup.sh.
+PHOTO_INBOX_DIR: "/path/to/telecode"
+
 # VS Code Server Configuration
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "your-secure-password"

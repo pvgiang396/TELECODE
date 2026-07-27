@@ -147,6 +147,12 @@ def probe_status(run_dir: Path) -> dict:
     if current_github_copilot_pat == "YOUR_GITHUB_COPILOT_PAT_HERE":
         current_github_copilot_pat = ""
 
+    # Mặc định = chính thư mục cài telecode (run_dir.parent = $DIR trong setup.sh)
+    # nếu chưa từng cấu hình PHOTO_INBOX_DIR.
+    current_photo_inbox_dir = read_value(project_config, "PHOTO_INBOX_DIR:")
+    if not current_photo_inbox_dir or current_photo_inbox_dir == "/path/to/telecode":
+        current_photo_inbox_dir = str(run_dir.parent)
+
     return {
         "codeServerInstalled": cs_installed,
         "codeServerVersion": cs_version,
@@ -162,6 +168,7 @@ def probe_status(run_dir: Path) -> dict:
         "currentToken": current_token,
         "currentOpenaiApiKey": current_openai_key,
         "currentGithubCopilotPat": current_github_copilot_pat,
+        "currentPhotoInboxDir": current_photo_inbox_dir,
     }
 
 

@@ -931,6 +931,20 @@ else
 fi
 echo ""
 
+# --- 6d. Thư mục nhận ảnh gửi qua Telegram ------------------------------------
+# Chụp ảnh gửi thẳng cho bot (chat riêng) -> bot.py tự tải và lưu vào đúng 1 thư
+# mục cố định trên máy chạy telecode, để đồng bộ ảnh từ điện thoại về máy tính khi
+# làm việc từ xa mà không cần cài thêm app đồng bộ (Syncthing/Nextcloud...). Mặc
+# định là chính $DIR (thư mục chứa source telecode) — đổi được ở đây nếu muốn trỏ
+# nơi khác (vd 1 thư mục con trong $CODE_SERVER_WORKSPACE để mở luôn trong VS Code).
+CURRENT_PHOTO_DIR="$(grep '^PHOTO_INBOX_DIR:' "$CONFIG_FILE" 2>/dev/null | sed -E 's/^PHOTO_INBOX_DIR: *"?([^"]*)"?/\1/')"
+[ -z "$CURRENT_PHOTO_DIR" ] && CURRENT_PHOTO_DIR="$DIR"
+echo "6d) Thư mục nhận ảnh gửi qua Telegram — mặc định là thư mục cài telecode ($DIR)."
+PHOTO_INBOX_DIR="$(ask_value "   Thư mục nhận ảnh" "$CURRENT_PHOTO_DIR" 0 "photoInboxDir")"
+mkdir -p "$PHOTO_INBOX_DIR" || { err "Không tạo được thư mục $PHOTO_INBOX_DIR"; exit 1; }
+ok "   Ảnh gửi qua Telegram sẽ lưu vào: $PHOTO_INBOX_DIR"
+echo ""
+
 # Mã claim quyền owner — giữ nguyên nếu đã có (tránh vô hiệu mã đã đưa cho người
 # dùng ở lần chạy trước mà họ chưa kịp /start), chỉ sinh mới nếu chưa từng có.
 # Không liên quan tới state.json (owner_chat_id) — mã này chỉ cần lúc CLAIM lần
@@ -947,6 +961,7 @@ cat > "$CONFIG_FILE" <<EOF
 TELEGRAM_BOT_TOKEN: "$BOT_TOKEN"
 OPENAI_API_KEY: "$OPENAI_API_KEY"
 GITHUB_COPILOT_PAT: "$GITHUB_COPILOT_PAT"
+PHOTO_INBOX_DIR: "$PHOTO_INBOX_DIR"
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "$CS_PASSWORD"
 VSCODE_PUBLIC_URL: "$VSCODE_PUBLIC_URL"
