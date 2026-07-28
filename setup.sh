@@ -472,22 +472,20 @@ resolve_app_mode_browser_bin() {
     return 1
 }
 
+chmod +x "$DIR/scripts/launch.sh" 2>/dev/null || true
 if [ -d "$HOME/Desktop" ]; then
     ICON_FILE="$DIR/assets/icon.png"
     APP_BROWSER="$(resolve_app_mode_browser_bin || true)"
+    # Shortcut gọi scripts/launch.sh thay vì mở trình duyệt thẳng — script đó tự
+    # kiểm tra + khởi động lại code-server/bot/Tailscale nếu đang tắt (bug thật đã
+    # gặp: Tailscale tự đăng xuất sau khi máy sleep, mini app điện thoại không vào
+    # được dù mở trên máy tính vẫn OK) trước khi mở app, không cần user tự debug.
     if [ "$OS" = "mac" ]; then
         SHORTCUT="$HOME/Desktop/Telecode.command"
-        if [ -n "$APP_BROWSER" ]; then
-            cat > "$SHORTCUT" <<EOF
+        cat > "$SHORTCUT" <<EOF
 #!/bin/bash
-"$APP_BROWSER" --app=http://localhost:8443
+bash "$DIR/scripts/launch.sh"
 EOF
-        else
-            cat > "$SHORTCUT" <<EOF
-#!/bin/bash
-open http://localhost:8443
-EOF
-        fi
         chmod +x "$SHORTCUT"
     else
         SHORTCUT="$HOME/Desktop/telecode.desktop"
@@ -497,19 +495,17 @@ EOF
             # google-chrome.desktop (StartupWMClass=Google-chrome) da cai san, taskbar
             # luon hien icon Chrome that, bo qua ca favicon lan Icon= o duoi (bug that
             # da xac minh qua xprop). Doi WM_CLASS rieng + StartupWMClass= khop ben duoi
-            # de desktop environment dung dung Icon= cua file nay.
-            EXEC_LINE="$APP_BROWSER --app=http://localhost:8443 --class=Telecode"
+            # de desktop environment dung dung Icon= cua file nay. launch.sh (buoc 3
+            # trong chinh no) tu truyen --class=Telecode khi mo trinh duyet, giu dung
+            # WM_CLASS voi StartupWMClass= khai bao o day.
             STARTUP_WM_CLASS_LINE="StartupWMClass=Telecode"
         else
-            # Fallback: khong tim thay Chrome/Edge/Chromium -> xdg-open mo THANG
-            # trinh duyet mac dinh cua he thong (Firefox, ...), khong phai app-mode.
-            # KHONG duoc dat StartupWMClass=Telecode o day (bug that da gap): cua
-            # so that mo ra mang WM_CLASS cua chinh trinh duyet do (vd "firefox"),
-            # khong khop "Telecode" -> DE (Cinnamon/GNOME) khong nhan dien duoc cua
-            # so that nen giu nguyen icon cua launcher (Icon= o duoi, la icon
-            # Telecode) tren taskbar trong luc/sau khi mo, thay vi tra ve icon that
-            # cua trinh duyet mac dinh.
-            EXEC_LINE="xdg-open http://localhost:8443"
+            # Khong tim thay Chrome/Edge/Chromium -> launch.sh tu fallback xdg-open mo
+            # THANG trinh duyet mac dinh (vd Firefox), khong phai app-mode. KHONG duoc
+            # dat StartupWMClass=Telecode o day (bug that da gap): cua so that mo ra
+            # mang WM_CLASS cua chinh trinh duyet do, khong khop "Telecode" -> DE
+            # (Cinnamon/GNOME) khong nhan dien duoc cua so that nen giu nguyen icon cua
+            # launcher tren taskbar thay vi tra ve icon that cua trinh duyet mac dinh.
             STARTUP_WM_CLASS_LINE=""
         fi
         cat > "$SHORTCUT" <<EOF
@@ -517,7 +513,7 @@ EOF
 Type=Application
 Name=Telecode
 Comment=Telecode by Yan
-Exec=$EXEC_LINE
+Exec=bash "$DIR/scripts/launch.sh"
 Icon=${ICON_FILE:-code}
 ${STARTUP_WM_CLASS_LINE}
 Terminal=false
@@ -526,9 +522,9 @@ EOF
         chmod +x "$SHORTCUT"
         command -v gio >/dev/null 2>&1 && gio set "$SHORTCUT" metadata::trusted true 2>/dev/null || true
     fi
-    ok "Đã tạo shortcut Desktop: $SHORTCUT"
+    ok "Đã tạo shortcut Desktop: $SHORTCUT (tự kiểm tra/khởi động lại code-server, bot, Tailscale trước khi mở)"
 else
-    warn "Không thấy thư mục $HOME/Desktop — bỏ qua tạo shortcut (bạn vẫn mở tay http://localhost:8443)."
+    warn "Không thấy thư mục $HOME/Desktop — bỏ qua tạo shortcut. Chạy tay: bash $DIR/scripts/launch.sh"
 fi
 echo ""
 
