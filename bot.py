@@ -178,12 +178,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("⚠️ Hiện chưa có server telecode nào online. Kiểm tra lại code-server/tailscale trên máy chạy telecode.")
         return
 
+    # web_app=WebAppInfo(...) thay vì url=... — bug thật đã gặp: nút kiểu url=
+    # (Telegram tự mở bằng trình duyệt trong-app riêng của nó) báo "Không thể
+    # truy cập trang web này" trên 1 máy thật dù server hoàn toàn bình thường
+    # (xác nhận qua curl trực tiếp IP relay Funnel công khai, bypass hẳn máy chạy
+    # server), trong khi icon Menu Button (đã dùng WebAppInfo từ trước, xem
+    # post_init() bên dưới) mở CÙNG URL đó vẫn vào bình thường — khác biệt duy
+    # nhất là cơ chế mở, không phải server/DNS/Tailscale. Dùng WebAppInfo cho cả
+    # /start lẫn Menu Button để nhất quán, tránh phụ thuộc trình duyệt trong-app
+    # (vốn không phải WebView tiêu chuẩn của Telegram, hành vi tuỳ phiên
+    # bản/nền tảng, không đáng tin cậy bằng Mini App WebView chính thức).
     if len(alive) == 1:
         name, url = alive[0]
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(f"🔧 Mở VS Code ({name})", url=url)]])
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(f"🔧 Mở VS Code ({name})", web_app=WebAppInfo(url=url))]])
         text = "🚀 *VS Code Remote Control*\n\nBấm nút bên dưới để mở VS Code từ điện thoại!"
     else:
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(f"🖥️ {name}", url=url)] for name, url in alive])
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(f"🖥️ {name}", web_app=WebAppInfo(url=url))] for name, url in alive])
         text = "🚀 *VS Code Remote Control*\n\nCó nhiều máy đang online — chọn máy muốn mở:"
 
     await update.message.reply_text(text, parse_mode='Markdown', reply_markup=keyboard)

@@ -765,6 +765,19 @@ else
     curl -fsSL https://tailscale.com/install.sh | sh
 fi
 ok "Tailscale sẵn sàng: $(command -v tailscale)"
+
+# tailscaled (daemon hệ thống) cần tự khởi động cùng OS để funnel sống lại sau
+# reboot mà không cần ai đăng nhập — gói .deb/.rpm cài sẵn thường đã enable, chỉ
+# tự bật nếu vì lý do gì đó chưa (idempotent, không lỗi nếu đã enabled).
+if command -v systemctl &>/dev/null && ! systemctl is-enabled --quiet tailscaled 2>/dev/null; then
+    if command -v pkexec &>/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        pkexec systemctl enable tailscaled && ok "Đã bật tailscaled tự khởi động cùng OS" \
+            || warn "Không tự bật được tailscaled tự khởi động — chạy tay: sudo systemctl enable tailscaled"
+    else
+        sudo systemctl enable tailscaled && ok "Đã bật tailscaled tự khởi động cùng OS" \
+            || warn "Không tự bật được tailscaled tự khởi động — chạy tay: sudo systemctl enable tailscaled"
+    fi
+fi
 echo ""
 
 # --- 4b. Đăng nhập tailnet ----------------------------------------------------
@@ -812,9 +825,30 @@ VSCODE_PUBLIC_URL="https://$TS_DNS_NAME"
 # nhưng route sai cổng backend nội bộ, gây HTTP 502 mà chỉ phát hiện được khi
 # tự tay mở URL từ điện thoại. Retry vài lần vì Funnel/cert có thể mất 1-2s để
 # áp dụng ngay sau khi cấu hình.
+#
+# Bug thật khác đã gặp + đã fix: verify chạy NGAY TRÊN máy có cài Tailscale ->
+# resolver hệ thống (MagicDNS) trả IP NỘI BỘ tailnet cho hostname *.ts.net,
+# khác hẳn IP relay Funnel công khai mà 1 client ngoài tailnet (điện thoại)
+# thực sự dùng -> verify PASS giả dù đường public thật đang lỗi (đúng bug user
+# report: tray báo xanh nhưng điện thoại "Không thể truy cập trang web này").
+# Ép resolve qua DNS công khai (dig @1.1.1.1, fallback @8.8.8.8) rồi curl
+# --resolve vào đúng IP đó — cùng cơ chế với scripts/lib_status.py's
+# check_funnel_public_reachable() (dùng cho tray.py), giữ đồng bộ 1 chỗ.
+FUNNEL_PUBLIC_IP=""
+if command -v dig &>/dev/null; then
+    FUNNEL_PUBLIC_IP="$(dig @1.1.1.1 "$TS_DNS_NAME" +short +time=3 +tries=1 2>/dev/null | head -n1)"
+    [ -n "$FUNNEL_PUBLIC_IP" ] || FUNNEL_PUBLIC_IP="$(dig @8.8.8.8 "$TS_DNS_NAME" +short +time=3 +tries=1 2>/dev/null | head -n1)"
+fi
 FUNNEL_HTTP_CODE="000"
 for _ in $(seq 1 10); do
-    FUNNEL_HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$VSCODE_PUBLIC_URL" 2>/dev/null || echo 000)"
+    if [ -n "$FUNNEL_PUBLIC_IP" ]; then
+        FUNNEL_HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$TS_DNS_NAME:443:$FUNNEL_PUBLIC_IP" "$VSCODE_PUBLIC_URL" 2>/dev/null || echo 000)"
+    else
+        # Không có `dig`/không dò được IP public -> fallback verify theo resolver
+        # hệ thống (có thể vẫn dính MagicDNS false-positive, nhưng còn hơn không
+        # verify gì cả — cài `dig` (gói dnsutils/bind-utils) để verify chính xác).
+        FUNNEL_HTTP_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$VSCODE_PUBLIC_URL" 2>/dev/null || echo 000)"
+    fi
     case "$FUNNEL_HTTP_CODE" in
         000|502|503|504) sleep 1 ;;
         *) break ;;
@@ -1056,9 +1090,21 @@ fi
 echo ""
 
 # --- 8. Python venv + dependencies -------------------------------------------
+# --system-site-packages (chỉ Linux): tray.py cần pystray dùng backend
+# AppIndicator3 (StatusNotifierItem, có popup menu thật) thay vì fallback Xorg
+# legacy (chỉ click trái gọi được item "default", KHÔNG hiện popup menu — bug
+# thật đã gặp khi test: bấm icon không ra menu gì). AppIndicator3/Ayatana là
+# GObject Introspection binding (`python3-gi`, gói hệ thống qua apt, không pip
+# install được dễ dàng) — venv mặc định cô lập khỏi site-packages hệ thống nên
+# không thấy `gi`, pystray tự fallback về Xorg. macOS/Windows dùng backend
+# darwin/win32 riêng, không cần `gi`, nên chỉ set flag này trên Linux.
 if [ ! -d "$DIR/venv" ]; then
     info "8) Tạo virtualenv..."
-    python3 -m venv "$DIR/venv"
+    if [ "$OS" = "linux" ]; then
+        python3 -m venv --system-site-packages "$DIR/venv"
+    else
+        python3 -m venv "$DIR/venv"
+    fi
 fi
 VENV_PY="$DIR/venv/bin/python3"
 if ! "$VENV_PY" -m pip --version &>/dev/null; then
@@ -1145,10 +1191,73 @@ fi
 if [ "$USE_SYSTEMD" = "1" ]; then
     ok "Bot đang chạy qua systemd --user (tự restart nếu crash) — service: $BOT_SERVICE"
     if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q "Linger=yes"; then
-        warn "Bot sẽ dừng khi bạn logout khỏi máy — chạy 'loginctl enable-linger $(id -un)' 1 lần để giữ chạy nền 24/7 (cần trên máy chủ/VPS)."
+        # Tự bật linger để code-server/bot chạy được ngay từ lúc máy khởi động,
+        # không cần đăng nhập trước — nhiều distro cho tự bật cho chính mình qua
+        # polkit (auth_self_keep) không cần root (đã xác nhận trên máy dev); nếu
+        # không, fallback pkexec/sudo (cùng pattern "tailscale up" ở bước 4b).
+        if loginctl enable-linger "$(id -un)" 2>/dev/null; then
+            ok "Đã bật linger — code-server/bot tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
+        elif command -v pkexec &>/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && pkexec loginctl enable-linger "$(id -un)" 2>/dev/null; then
+            ok "Đã bật linger (qua pkexec) — code-server/bot tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
+        elif sudo loginctl enable-linger "$(id -un)" 2>/dev/null; then
+            ok "Đã bật linger (qua sudo) — code-server/bot tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
+        else
+            warn "Không tự bật được linger — chạy tay 1 lần: loginctl enable-linger $(id -un) (giữ bot/code-server chạy nền kể cả khi chưa đăng nhập)."
+        fi
     fi
 else
     ok "Bot đang chạy (PID $(cat "$BOT_PID")) — không tự restart nếu crash (cần systemd --user, hiện không khả dụng trên máy này)."
+fi
+echo ""
+
+# --- 9b. Tray icon trạng thái (tray.py) --------------------------------------
+# Bug thật đã gặp + đã fix: bản đầu dùng XDG autostart (~/.config/autostart) +
+# khởi động tay 1 lần qua nohup lúc cài — nohup đó chỉ sống chung vòng đời với
+# tiến trình cài đặt (vd session AI agent chạy setup.sh), KHÔNG phải service độc
+# lập — hễ tiến trình cha đó kết thúc (không cần logout/khoá màn hình, chỉ cần
+# session cha biến mất) là tray chết theo, icon biến mất khỏi panel dù máy vẫn
+# đăng nhập bình thường; XDG autostart cũng KHÔNG tự restart nếu tray crash giữa
+# chừng. Fix: dùng `systemd --user` với `PartOf=graphical-session.target` +
+# `Restart=always` (đúng pattern code-server/telecode-bot đã dùng) — độc lập với
+# bất kỳ tiến trình cha nào, tự sống lại nếu crash. `graphical-session.target` đã
+# active ngay khi đăng nhập Cinnamon (biến DISPLAY/XAUTHORITY được systemd user
+# manager import sẵn — xác nhận qua `systemctl --user show-environment` trên máy
+# dev) nên `WantedBy=graphical-session.target` là đủ, không cần chờ thêm.
+if [ "$USE_SYSTEMD" = "1" ]; then
+    TRAY_SERVICE="telecode-tray"
+    # Dọn autostart .desktop kiểu cũ nếu còn sót từ bản trước (tránh chạy 2 lần).
+    rm -f "$HOME/.config/autostart/telecode-tray.desktop"
+
+    mkdir -p "$HOME/.config/systemd/user"
+    cat > "$HOME/.config/systemd/user/$TRAY_SERVICE.service" <<EOF
+[Unit]
+Description=Telecode tray icon status
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$VENV_PY $DIR/tray.py
+Restart=always
+RestartSec=3
+StandardOutput=append:$LOG_DIR/tray.log
+StandardError=append:$LOG_DIR/tray.log
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+    systemctl --user daemon-reload
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        systemctl --user enable --now "$TRAY_SERVICE" \
+            && ok "Tray icon chạy qua systemd --user (tự restart nếu crash, độc lập với tiến trình cài đặt) — service: $TRAY_SERVICE" \
+            || warn "Không khởi động được tray icon ngay — thử tay: systemctl --user start $TRAY_SERVICE"
+    else
+        systemctl --user enable "$TRAY_SERVICE"
+        ok "Đã bật tray icon (service: $TRAY_SERVICE) — tự chạy ở lần đăng nhập đồ hoạ kế tiếp (máy hiện không có phiên đồ hoạ để chạy ngay)."
+    fi
+elif [ "$OS" = "linux" ]; then
+    warn "Không có systemd --user khả dụng — tray icon cần chạy tay: $VENV_PY $DIR/tray.py"
+else
+    warn "Tray icon autostart hiện chỉ hỗ trợ Linux (Cinnamon/GNOME) — trên macOS/Windows tự chạy tay: python3 tray.py"
 fi
 echo ""
 

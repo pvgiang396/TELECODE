@@ -22,154 +22,18 @@ import threading
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+from lib_status import get_status  # noqa: E402
+
 PORT = 8899
 
 
-def is_alive(pidfile: Path) -> tuple[bool, int]:
-    if not pidfile.exists():
-        return False, 0
-    try:
-        pid = int(pidfile.read_text().strip())
-    except ValueError:
-        return False, 0
-    try:
-        os.kill(pid, 0)
-        return True, pid
-    except OSError:
-        return False, 0
-
-
-def read_value(path: Path, key_prefix: str) -> str:
-    """Đọc giá trị dạng 'key: "value"' hoặc 'key: value' từ file yaml đơn giản."""
-    if not path.exists():
-        return ""
-    for line in path.read_text().splitlines():
-        if line.strip().startswith(key_prefix):
-            v = line.split(":", 1)[1].strip()
-            return v.strip('"').strip("'")
-    return ""
-
-
 def probe_status(run_dir: Path) -> dict:
-    cs_config = Path.home() / ".config/code-server/config.yaml"
-    project_config = run_dir.parent / "config.yaml"
-
-    cs_installed = shutil.which("code-server") is not None
-    cs_version = ""
-    if cs_installed:
-        try:
-            cs_version = subprocess.run(
-                ["code-server", "--version"], capture_output=True, text=True, timeout=5
-            ).stdout.splitlines()[0]
-        except Exception:
-            cs_version = ""
-
-    # Tailscale thay cloudflared làm tunnel (xem setup.sh bước 4/5) — probe đúng 2
-    # lệnh setup.sh tự dùng để quyết định "keep"/"redo" (tailscale version / tailscale
-    # funnel status), không còn PID file/log riêng như cloudflared cũ (tailscaled là
-    # daemon hệ thống, không phải tiến trình con setup.sh tự quản).
-    ts_installed = shutil.which("tailscale") is not None
-    ts_version = ""
-    if ts_installed:
-        try:
-            ts_version = subprocess.run(
-                ["tailscale", "version"], capture_output=True, text=True, timeout=5
-            ).stdout.splitlines()[0]
-        except Exception:
-            ts_version = ""
-
-    # setup.sh ưu tiên systemd --user cho cả code-server lẫn bot.py (Restart=always,
-    # tự hồi sinh khi crash) trên Linux có systemd — file PID cũ chỉ còn để tương
-    # thích hiển thị, không phản ánh đúng trạng thái sống/chết sau khi service tự
-    # restart 1 lần. Kiểm tra thẳng qua systemctl nếu unit tồn tại, fallback PID file.
-    cs_running, cs_pid = is_alive(run_dir / "code-server.pid")
-    if (Path.home() / ".config/systemd/user/code-server.service").exists():
-        try:
-            active = subprocess.run(
-                ["systemctl", "--user", "is-active", "code-server"],
-                capture_output=True, text=True, timeout=5,
-            ).stdout.strip()
-            cs_running = active == "active"
-            if cs_running:
-                cs_pid = int(subprocess.run(
-                    ["systemctl", "--user", "show", "code-server", "-p", "MainPID", "--value"],
-                    capture_output=True, text=True, timeout=5,
-                ).stdout.strip() or 0)
-        except Exception:
-            pass
-
-    bot_running, bot_pid = is_alive(run_dir / "bot.pid")
-    if (Path.home() / ".config/systemd/user/telecode-bot.service").exists():
-        try:
-            active = subprocess.run(
-                ["systemctl", "--user", "is-active", "telecode-bot"],
-                capture_output=True, text=True, timeout=5,
-            ).stdout.strip()
-            bot_running = active == "active"
-            if bot_running:
-                bot_pid = int(subprocess.run(
-                    ["systemctl", "--user", "show", "telecode-bot", "-p", "MainPID", "--value"],
-                    capture_output=True, text=True, timeout=5,
-                ).stdout.strip() or 0)
-        except Exception:
-            pass
-
-    funnel_configured = False
-    tailscale_url = ""
-    if ts_installed:
-        try:
-            fs = subprocess.run(
-                ["tailscale", "funnel", "status"], capture_output=True, text=True, timeout=5
-            ).stdout
-            funnel_configured = "127.0.0.1:8443" in fs
-        except Exception:
-            pass
-        try:
-            st = json.loads(subprocess.run(
-                ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5
-            ).stdout)
-            dns_name = st.get("Self", {}).get("DNSName", "").rstrip(".")
-            if dns_name:
-                tailscale_url = f"https://{dns_name}"
-        except Exception:
-            pass
-
-    current_password = read_value(cs_config, "password:")
-    current_token = read_value(project_config, "TELEGRAM_BOT_TOKEN:")
-    if current_token == "YOUR_BOT_TOKEN_HERE":
-        current_token = ""
-
-    current_openai_key = read_value(project_config, "OPENAI_API_KEY:")
-    if current_openai_key == "YOUR_OPENAI_API_KEY_HERE":
-        current_openai_key = ""
-
-    current_github_copilot_pat = read_value(project_config, "GITHUB_COPILOT_PAT:")
-    if current_github_copilot_pat == "YOUR_GITHUB_COPILOT_PAT_HERE":
-        current_github_copilot_pat = ""
-
-    # Mặc định = thư mục con "files" trong thư mục cài telecode (run_dir.parent =
-    # $DIR trong setup.sh) nếu chưa từng cấu hình FILE_INBOX_DIR.
-    current_file_inbox_dir = read_value(project_config, "FILE_INBOX_DIR:")
-    if not current_file_inbox_dir or current_file_inbox_dir == "/path/to/telecode/files":
-        current_file_inbox_dir = str(run_dir.parent / "files")
-
-    return {
-        "codeServerInstalled": cs_installed,
-        "codeServerVersion": cs_version,
-        "codeServerRunning": cs_running,
-        "codeServerPid": cs_pid,
-        "tailscaleInstalled": ts_installed,
-        "tailscaleVersion": ts_version,
-        "funnelConfigured": funnel_configured,
-        "tailscaleUrl": tailscale_url,
-        "botRunning": bot_running,
-        "botPid": bot_pid,
-        "currentPassword": current_password,
-        "currentToken": current_token,
-        "currentOpenaiApiKey": current_openai_key,
-        "currentGithubCopilotPat": current_github_copilot_pat,
-        "currentFileInboxDir": current_file_inbox_dir,
-    }
+    """Wrapper mỏng gọi scripts/lib_status.py (dùng chung với tray.py) — giữ
+    nguyên tên hàm/field cũ để không phải sửa chỗ gọi bên dưới. check_public=False
+    vì UI wizard poll liên tục lúc cài đặt, không cần tốn round-trip curl public
+    mỗi lần (tray.py mới là nơi cần check_public=True để quyết định icon)."""
+    return get_status(run_dir, check_public=False)
 
 
 def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):

@@ -8,6 +8,10 @@ python-dotenv==1.0.0
 # Async HTTP client (optional, for status checking)
 aiohttp==3.9.0
 
+# Tray icon trạng thái (tray.py) — Linux/Cinnamon dùng backend Xorg (python-xlib)
+pystray==0.19.5
+Pillow>=10.0.0
+
 # Production server (optional)
 # gunicorn==21.2.0
 # uvicorn==0.24.0
