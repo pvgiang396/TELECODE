@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Telecode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.pvgiang396.telecode",
   "build": {
     "frontendDist": "./frontend-placeholder"
@@ -23,7 +23,6 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../bot.py": "src/bot.py",
       "../wizard.py": "src/wizard.py",
       "../setup.sh": "src/setup.sh",
       "../requirements.txt": "src/requirements.txt",
