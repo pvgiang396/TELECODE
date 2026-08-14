@@ -40,7 +40,7 @@ nano config.yaml  # Chỉnh sửa với token
 **Chỉnh sửa config.yaml:**
 ```yaml
 TELEGRAM_BOT_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"  # Token từ BotFather
-OPENAI_API_KEY: ""  # Tuỳ chọn — điền để setup.sh tự cài Codex CLI extension (qua 9Router/Gemini), để trống nếu chưa dùng
+OPENAI_API_KEY: ""  # Tuỳ chọn — API key 9Router/OpenAI (thường sk-..., KHÔNG dùng token AQ...), để trống nếu chưa dùng
 VSCODE_PUBLIC_URL: "http://localhost:8443"  # Tạm thời (sẽ update sau)
 MINI_APP_URL: "http://localhost:8000/mini_app.html"  # Development
 ```

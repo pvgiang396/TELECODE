@@ -124,12 +124,21 @@ def check_funnel_public_reachable(url: str, timeout: int = 5) -> tuple[bool, int
     return ok, code
 
 
-def get_status(run_dir: Path, check_public: bool = True) -> dict:
+def get_status(run_dir: Path, check_public: bool = True, project_dir: Path | None = None) -> dict:
     """Trả về dict trạng thái đầy đủ — format tương thích ngược với
     wizard.py's probe_status() cũ (giữ nguyên tên field), thêm 2 field mới
-    funnelPubliclyReachable/funnelPublicHttpCode."""
+    funnelPubliclyReachable/funnelPublicHttpCode.
+
+    project_dir — thư mục chứa config.yaml thật (nơi setup.sh/bot.py chạy). Mặc định
+    `run_dir.parent` ĐÚNG cho CLI gốc (RUN_DIR = "$DIR/.run", DIR chính là project_dir) nhưng SAI ở
+    bản Tauri — run_dir ở đó là `app_data_dir()/run`, KHÔNG nằm cạnh `app_data_dir()/source/
+    config.yaml` — bug thật đã gặp: currentToken/currentOpenaiApiKey/currentGithubCopilotPat luôn
+    đọc ra rỗng dù config.yaml có giá trị, khiến wizard tưởng "chưa cấu hình"/token bị mất. wizard.py
+    (Tauri) phải truyền project_dir=dir_ tường minh; tray.py (CLI, chưa dùng trong Tauri) giữ nguyên
+    hành vi cũ khi không truyền tham số này."""
     cs_config = Path.home() / ".config/code-server/config.yaml"
-    project_config = run_dir.parent / "config.yaml"
+    project_root = project_dir if project_dir is not None else run_dir.parent
+    project_config = project_root / "config.yaml"
 
     cs_installed = shutil.which("code-server") is not None
     cs_version = ""
@@ -202,13 +211,16 @@ def get_status(run_dir: Path, check_public: bool = True) -> dict:
 
     current_file_inbox_dir = read_value(project_config, "FILE_INBOX_DIR:")
     if not current_file_inbox_dir or current_file_inbox_dir == "/path/to/telecode/files":
-        current_file_inbox_dir = str(run_dir.parent / "files")
+        current_file_inbox_dir = str(project_root / "files")
+
+    vscode_port = read_value(project_config, "VSCODE_PORT:") or "8443"
 
     return {
         "codeServerInstalled": cs_installed,
         "codeServerVersion": cs_version,
         "codeServerRunning": cs_running,
         "codeServerPid": cs_pid,
+        "vscodePort": vscode_port,
         "tailscaleInstalled": ts_installed,
         "tailscaleVersion": ts_version,
         "tailscaleBackendState": ts_backend_state,

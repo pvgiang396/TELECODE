@@ -13,7 +13,9 @@
 set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN_DIR="$DIR/.run"
+# TELECODE_RUN_DIR — override khi setup.sh được spawn từ wizard.py chạy trong Tauri
+# (RUN_DIR thật lúc đó là app_data_dir()/run, không nằm cạnh chính setup.sh như CLI gốc).
+RUN_DIR="${TELECODE_RUN_DIR:-$DIR/.run}"
 LOG_DIR="$DIR/logs"
 mkdir -p "$RUN_DIR" "$LOG_DIR"
 
@@ -273,7 +275,7 @@ patch_code_server_assets() {
     # 3 điều kiện đều đã đạt (idempotent riêng từng phần) -> không cần sudo gì cả.
     local login_ok=0 css_ok=0 favicon_ok=0
     grep -q "telecode-eye-toggle" "$html" 2>/dev/null && grep -q "telecode-anti-inspect" "$html" 2>/dev/null && login_ok=1
-    grep -q "telecode-eye-toggle-css-v2" "$css" 2>/dev/null && css_ok=1
+    grep -q "telecode-eye-toggle-css-v2" "$css" 2>/dev/null && grep -q "telecode-dark-theme-css-v1" "$css" 2>/dev/null && css_ok=1
     cmp -s "$DIR/assets/icon.ico" "$media/favicon.ico" 2>/dev/null && favicon_ok=1
     if [ "$login_ok" = 1 ] && [ "$css_ok" = 1 ] && [ "$favicon_ok" = 1 ]; then
         return
@@ -352,6 +354,8 @@ with open(html_path, "w", encoding="utf-8") as f:
 with open(css_path, "r", encoding="utf-8") as f:
     css = f.read()
 
+css_changed = False
+
 if "telecode-eye-toggle-css-v2" in css:
     print("css: da vao (v2), bo qua")
 else:
@@ -396,9 +400,54 @@ else:
   padding: 4px;
 }
 """
-    with open(css_path, "w", encoding="utf-8") as f:
-        f.write(css + css_addition)
+    css = css + css_addition
+    css_changed = True
     print("css: da vao/cap nhat")
+
+# Trang login goc cua code-server mac dinh nen trang/sang - khac han theme toi cua
+# wizard.html (#1e1e1e/#252526/#3c3c3c/#e5e5e5/#3f83f8). Khong biet chac toan bo
+# selector noi bo code-server (de vo khi code-server update) nen chi ep bang !important
+# o muc html/body + cac phan tu .login-form/.field/input da biet chac ton tai (dung
+# chung selector voi khoi eye-toggle o tren).
+if "telecode-dark-theme-css-v1" in css:
+    print("css: dark theme da vao, bo qua")
+else:
+    dark_css = """
+
+/* telecode-dark-theme-css-v1 */
+:root { color-scheme: dark; }
+html, body {
+  background: #1e1e1e !important;
+  color: #e5e5e5 !important;
+}
+.login-form, .card, .field {
+  background: #252526 !important;
+  color: #e5e5e5 !important;
+  border-color: #3c3c3c !important;
+}
+.login-form > .field .password,
+.login-form input[type="text"],
+.login-form input[type="password"] {
+  background: #1e1e1e !important;
+  color: #e5e5e5 !important;
+  border-color: #4b5563 !important;
+}
+.login-form .submit,
+.login-form .-button {
+  background: #3f83f8 !important;
+  color: #fff !important;
+}
+.login-form a {
+  color: #3f83f8 !important;
+}
+"""
+    css = css + dark_css
+    css_changed = True
+    print("css: dark theme da vao/cap nhat")
+
+if css_changed:
+    with open(css_path, "w", encoding="utf-8") as f:
+        f.write(css)
 
 # --- Favicon/PWA icon riêng: Chrome (--app=) lấy icon taskbar từ đây, không
 # phải Icon= trong .desktop (cái đó chỉ ảnh hưởng icon launcher trước khi chạy).
@@ -886,10 +935,15 @@ echo ""
 # -> cài thẳng bằng --install-extension, không cần install_vsix_extension() (hàm
 # đó chỉ dành cho extension chỉ có trên VS Marketplace như Copilot). base_url/
 # model/wire_api cố định (9Router dùng chung của team) -> chỉ hỏi OPENAI_API_KEY.
+# LƯU Ý: đây phải là API key của router/proxy (thường dạng `sk-...`), KHÔNG phải
+# token đăng nhập Codex (`AQ...`), nếu nhầm sẽ nhận 401 "API key required...".
 CURRENT_OPENAI_KEY="$(grep '^OPENAI_API_KEY:' "$CONFIG_FILE" 2>/dev/null | sed -E 's/^OPENAI_API_KEY: *"?([^"]*)"?/\1/')"
 [ "$CURRENT_OPENAI_KEY" = "YOUR_OPENAI_API_KEY_HERE" ] && CURRENT_OPENAI_KEY=""
 echo "6b) Codex CLI qua 9Router (Gemini) — để trống nếu chưa dùng, có thể bổ sung ở lần chạy setup.sh sau."
 OPENAI_API_KEY="$(ask_value "   OPENAI_API_KEY" "$CURRENT_OPENAI_KEY" 1 "openaiApiKey")"
+if [ -n "$OPENAI_API_KEY" ] && [[ "$OPENAI_API_KEY" == AQ.* ]]; then
+    warn "   OPENAI_API_KEY đang có dạng 'AQ.*' (token Codex login), không phải API key cho 9Router."
+fi
 if [ -n "$OPENAI_API_KEY" ]; then
     echo "$INSTALLED_EXT" | grep -q '^openai\.chatgpt$' || {
         info "   Đang cài extension Codex (openai.chatgpt)..."
@@ -908,6 +962,7 @@ model_provider = "9router"
 name = "9Router"
 base_url = "https://r8mbsct.abc-tunnel.us/v1"
 wire_api = "responses"
+env_key = "OPENAI_API_KEY"
 
 [agents.subagent]
 model = "9router"
@@ -934,30 +989,47 @@ echo ""
 # trường GH_TOKEN/GITHUB_TOKEN — vì `copilot` chạy như tiến trình con của chính
 # code-server, chỉ cần PAT có mặt trong environment của code-server (ghi vào
 # $CS_ENV_FILE, nạp qua EnvironmentFile= ở Bước 3) là đủ, không cần đụng gì tới
-# Gemini/Copilot extension. Khác Bước 6b: giá trị này KHÔNG ghi ra 1 tool riêng mà
-# ghi thẳng vào $CS_ENV_FILE vì đích đến là environment của code-server.
+# Gemini/Copilot extension. Khác Bước 6b: OPENAI_API_KEY/GH_TOKEN cần có trong
+# environment của code-server (Codex custom provider dùng env_key), nên đồng bộ cả
+# hai vào cùng $CS_ENV_FILE.
 CURRENT_GH_COPILOT_PAT="$(grep '^GITHUB_COPILOT_PAT:' "$CONFIG_FILE" 2>/dev/null | sed -E 's/^GITHUB_COPILOT_PAT: *"?([^"]*)"?/\1/')"
 [ "$CURRENT_GH_COPILOT_PAT" = "YOUR_GITHUB_COPILOT_PAT_HERE" ] && CURRENT_GH_COPILOT_PAT=""
 echo "6c) GitHub Copilot CLI (agent 'Copilot CLI' trong Gemini) — tạo PAT tại"
 echo "    https://github.com/settings/personal-access-tokens/new, bật quyền \"Copilot Requests\"."
 echo "    Để trống nếu chưa dùng, có thể bổ sung ở lần chạy setup.sh sau."
 GITHUB_COPILOT_PAT="$(ask_value "   GITHUB_COPILOT_PAT" "$CURRENT_GH_COPILOT_PAT" 1 "githubCopilotPat")"
-if [ -n "$GITHUB_COPILOT_PAT" ]; then
-    CS_ENV_NEW="GH_TOKEN=$GITHUB_COPILOT_PAT"
-    CS_ENV_OLD=""
-    [ -f "$CS_ENV_FILE" ] && CS_ENV_OLD="$(cat "$CS_ENV_FILE")"
-    if [ "$CS_ENV_NEW" != "$CS_ENV_OLD" ]; then
-        echo "$CS_ENV_NEW" > "$CS_ENV_FILE"
+if [ -z "$GITHUB_COPILOT_PAT" ]; then
+    info "   Bỏ qua Copilot CLI (chưa có GITHUB_COPILOT_PAT)."
+fi
+
+CS_ENV_TMP="$RUN_DIR/code-server.env.tmp"
+: > "$CS_ENV_TMP"
+[ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$CS_ENV_TMP"
+[ -n "$GITHUB_COPILOT_PAT" ] && echo "GH_TOKEN=$GITHUB_COPILOT_PAT" >> "$CS_ENV_TMP"
+
+CS_ENV_CHANGED=0
+if [ -s "$CS_ENV_TMP" ]; then
+    if [ ! -f "$CS_ENV_FILE" ] || ! cmp -s "$CS_ENV_TMP" "$CS_ENV_FILE"; then
+        mv "$CS_ENV_TMP" "$CS_ENV_FILE"
         chmod 600 "$CS_ENV_FILE"
-        if is_code_server_alive; then
-            info "   PAT vừa đổi — khởi động lại code-server để áp dụng."
-            stop_code_server
-            start_code_server
-        fi
-        ok "   Đã ghi $CS_ENV_FILE."
+        CS_ENV_CHANGED=1
+        ok "   Đã đồng bộ OPENAI_API_KEY/GH_TOKEN vào $CS_ENV_FILE."
+    else
+        rm -f "$CS_ENV_TMP"
     fi
 else
-    info "   Bỏ qua Copilot CLI (chưa có GITHUB_COPILOT_PAT)."
+    rm -f "$CS_ENV_TMP"
+    if [ -f "$CS_ENV_FILE" ]; then
+        rm -f "$CS_ENV_FILE"
+        CS_ENV_CHANGED=1
+        ok "   Đã xóa $CS_ENV_FILE (không còn key nào cần export cho code-server)."
+    fi
+fi
+
+if [ "$CS_ENV_CHANGED" = "1" ] && is_code_server_alive; then
+    info "   OPENAI_API_KEY/GH_TOKEN vừa đổi — khởi động lại code-server để áp dụng."
+    stop_code_server
+    start_code_server
 fi
 echo ""
 

@@ -84,7 +84,13 @@ fn main() {
                     Ok(children) => {
                         app_handle.manage(std::sync::Mutex::new(Some(children)));
 
-                        let url = "http://127.0.0.1:8899/"
+                        // ?tauri=1 — wizard.html đọc query này để KHÔNG gọi window.close() sau khi
+                        // lưu xong (xem CloseRequested handler bên dưới): webview trong cửa sổ Tauri
+                        // thật (khác cửa sổ Chrome --app= do wizard.py tự mở ở chế độ CLI độc lập) sẽ
+                        // bị blank trắng nếu JS tự gọi window.close() — webview unload nội dung trước
+                        // khi prevent_close()/hide() kịp chạy, để lại cửa sổ trắng trơn (bug thật đã
+                        // gặp, xem CLAUDE.md).
+                        let url = "http://127.0.0.1:8899/?tauri=1"
                             .parse()
                             .expect("URL wizard-server không hợp lệ");
 
@@ -93,7 +99,7 @@ fn main() {
                             "main",
                             WebviewUrl::External(url),
                         )
-                        .title("telecode")
+                        .title("Telecode")
                         .inner_size(900.0, 720.0)
                         .visible(!tray_only)
                         .build()
@@ -130,17 +136,44 @@ fn main() {
 /// CLAUDE.md nếu cần buộc user "reset về bản gốc").
 fn resolve_writable_source_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let dest = app.path().app_data_dir()?.join("source");
-    if dest.is_dir() {
-        return Ok(dest);
-    }
-
     let bundled_src = app
         .path()
         .resolve("src", tauri::path::BaseDirectory::Resource)?;
+    let bundled_version = app.package_info().version.to_string();
+    let version_marker = dest.join(".bundle-version");
+
+    if dest.is_dir() {
+        let cached_version = std::fs::read_to_string(&version_marker).unwrap_or_default();
+        if cached_version.trim() != bundled_version {
+            refresh_cached_source(&bundled_src, &dest, &bundled_version, &version_marker)?;
+        }
+        return Ok(dest);
+    }
+
     std::fs::create_dir_all(&dest)?;
     copy_dir_recursive(&bundled_src, &dest)?;
+    std::fs::write(&version_marker, &bundled_version)?;
     migrate_legacy_config(&dest);
     Ok(dest)
+}
+
+/// Chạy khi `.bundle-version` khác version bundle đang chạy (vừa `dpkg -i` bản `.deb` mới, kể cả
+/// qua tính năng "Cập nhật ứng dụng") — đồng bộ lại các file "code" (bot.py/wizard.py/setup.sh/
+/// scripts//assets/...) từ resource bundle mới NHẤT vào bản copy ghi-được. `copy_dir_recursive`
+/// chỉ duyệt theo `bundled_src` nên chỉ ghi đè đúng các entry có trong đó — `config.yaml`/`.env`/
+/// `venv/`/`logs/`/`.run/` (sinh ra bởi setup.sh, KHÔNG nằm trong bundled_src) không bị đụng tới,
+/// giữ nguyên state/cấu hình user qua các lần update. Trước đây (không có cơ chế này) cache chỉ
+/// copy đúng 1 lần lúc tạo — bản `.deb` mới không bao giờ tới được máy user đang chạy (gap đã ghi
+/// trong CLAUDE.md, root cause khiến fix Codex 401 không áp dụng được tới máy đã cài từ trước).
+fn refresh_cached_source(
+    bundled_src: &Path,
+    dest: &Path,
+    bundled_version: &str,
+    version_marker: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    copy_dir_recursive(bundled_src, dest)?;
+    std::fs::write(version_marker, bundled_version)?;
+    Ok(())
 }
 
 /// Bản cài `telecode` kiểu cũ (chạy trực tiếp qua systemd, không qua Tauri) quy ước clone vào

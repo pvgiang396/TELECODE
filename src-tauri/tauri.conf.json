@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "telecode",
+  "productName": "Telecode",
   "version": "0.1.0",
   "identifier": "com.pvgiang396.telecode",
   "build": {

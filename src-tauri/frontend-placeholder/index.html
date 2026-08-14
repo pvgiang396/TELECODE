@@ -1,1 +1,120 @@
-<!doctype html><html><body>telecode — nội dung thật do sidecar (wizard-server) phục vụ qua WebviewUrl::External, file này chỉ để thoả yêu cầu frontendDist của Tauri.</body></html>
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Telecode</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #1e1e1e; color: #e5e5e5;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  body { display: flex; flex-direction: column; }
+  header {
+    display: flex; align-items: center; justify-content: flex-start;
+    padding: 10px 18px; border-bottom: 1px solid #3c3c3c; background: #252526;
+    flex: 0 0 auto;
+  }
+  header .icon-btn {
+    background: none; border: none; cursor: pointer; font-size: 16px;
+    padding: 6px 8px; border-radius: 6px; color: #e5e5e5; line-height: 1;
+  }
+  header .icon-btn:hover { background: #3c3c3c; }
+  main { flex: 1 1 auto; min-height: 0; position: relative; }
+  #frame { display: none; width: 100%; height: 100%; border: none; }
+  #frame.show { display: block; }
+  #empty { padding: 40px 24px; text-align: center; color: #9a9a9a; font-size: 13px; }
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
+    align-items: flex-start; justify-content: center; padding: 24px; overflow-y: auto; z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    width: 100%; max-width: 480px; background: #1e1e1e; border: 1px solid #3c3c3c;
+    border-radius: 10px; padding: 24px;
+  }
+  .modal-box h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #9a9a9a; font-size: 13px; margin-bottom: 18px; }
+  input[type="text"] {
+    width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid #4b5563;
+    background: #1e1e1e; color: #e5e5e5; font-size: 14px;
+  }
+  input:focus { outline: 2px solid #3f83f8; }
+  .hint { font-size: 12px; color: #8a8a8a; margin-top: 8px; }
+  #btnConnect {
+    width: 100%; padding: 12px; border: none; border-radius: 6px; margin-top: 14px;
+    background: #3f83f8; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <button type="button" id="btnSettings" class="icon-btn" title="Đổi máy kết nối">⚙️</button>
+  </header>
+  <main>
+    <div id="empty">Chưa kết nối máy nào — bấm ⚙️ để nhập URL Tailscale của máy đang chạy code-server.</div>
+    <iframe id="frame"></iframe>
+  </main>
+
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal-box">
+      <h1>Kết nối máy</h1>
+      <div class="sub">Nhập URL Tailscale (hoặc Funnel) của máy đang chạy telecode/code-server.</div>
+      <input type="text" id="urlInput" placeholder="https://may-cua-ban.tailxxxx.ts.net" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="hint">URL được lưu trên chính điện thoại này (localStorage), không gửi đi đâu khác.</div>
+      <button type="button" id="btnConnect">Kết nối</button>
+    </div>
+  </div>
+
+<script>
+const STORAGE_KEY = 'telecode_remote_url';
+const frame = document.getElementById('frame');
+const empty = document.getElementById('empty');
+const modal = document.getElementById('settingsModal');
+const urlInput = document.getElementById('urlInput');
+
+function normalizeUrl(v) {
+  v = v.trim();
+  if (!v) return '';
+  if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+  return v;
+}
+
+function applyUrl(url) {
+  if (!url) {
+    frame.classList.remove('show');
+    empty.style.display = 'block';
+    return;
+  }
+  frame.src = url;
+  frame.classList.add('show');
+  empty.style.display = 'none';
+}
+
+function openSettings() { modal.classList.add('open'); }
+function closeSettings() { modal.classList.remove('open'); }
+
+document.getElementById('btnSettings').addEventListener('click', openSettings);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeSettings(); });
+
+document.getElementById('btnConnect').addEventListener('click', () => {
+  const url = normalizeUrl(urlInput.value);
+  if (!url) return;
+  localStorage.setItem(STORAGE_KEY, url);
+  applyUrl(url);
+  closeSettings();
+});
+
+const saved = localStorage.getItem(STORAGE_KEY) || '';
+urlInput.value = saved;
+if (saved) {
+  applyUrl(saved);
+} else {
+  openSettings();
+}
+</script>
+</body>
+</html>

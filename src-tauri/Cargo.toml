@@ -4,6 +4,12 @@ version = "0.1.0"
 description = "Desktop shell cho telecode — Tauri + Python sidecar (PyInstaller), kế thừa nguyên vẹn bot.py/wizard.py/setup.sh từ telecode"
 edition = "2021"
 
+[lib]
+# Bắt buộc phải có lib target để build Android/iOS (`cargo tauri android build` chạy `cargo build
+# --lib`, JNI load .so sinh ra từ đây) — desktop (Linux/Windows) VẪN dùng src/main.rs như cũ, KHÔNG
+# đụng gì tới lib.rs (2 entry point hoàn toàn tách biệt, xem lib.rs's docstring).
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

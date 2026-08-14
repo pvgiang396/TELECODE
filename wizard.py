@@ -20,6 +20,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
@@ -28,12 +30,97 @@ from lib_status import get_status  # noqa: E402
 PORT = 8899
 
 
-def probe_status(run_dir: Path) -> dict:
+def _cmdctl_exec(command: str, sudo: bool = False, timeout_ms: int = 120000) -> dict:
+    """Gọi cmdctl (đã có sẵn trong workspace, xem root CLAUDE.md) để chạy lệnh cần sudo —
+    KHÔNG tự gọi sudo trực tiếp (sẽ treo chờ nhập mật khẩu tương tác)."""
+    cmdctl_url = os.environ.get("CMDCTL_URL", "http://127.0.0.1:3003")
+    payload = json.dumps({"command": command, "sudo": sudo, "timeoutMs": timeout_ms}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{cmdctl_url}/exec", data=payload, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout_ms / 1000 + 10) as resp:
+        return json.loads(resp.read())
+
+
+def run_self_update() -> dict:
+    """Tính năng "Cập nhật ứng dụng" (nút 🔄 trong wizard.html) — port từ
+    k8sql/server/src/selfUpdate.ts: git pull -> build lại .deb -> cài qua cmdctl -> tự
+    restart. CHỈ hoạt động trên máy có sẵn git checkout nguồn (TELECODE_SOURCE_DIR), giống
+    hệt phạm vi K8SQL_SOURCE_DIR bên k8sql — máy user cài .deb bình thường (không có
+    checkout) sẽ nhận lỗi rõ ràng ở đây, không có hạ tầng phân phối/CI cho trường hợp đó."""
+    if os.environ.get("TELECODE_MANAGED") != "1":
+        raise RuntimeError("Tính năng Cập nhật ứng dụng chỉ dùng được trong bản Tauri.")
+    if sys.platform != "linux" or is_wsl():
+        raise RuntimeError("Cập nhật ứng dụng hiện chỉ hỗ trợ Linux native (không WSL).")
+    source_dir = os.environ.get("TELECODE_SOURCE_DIR")
+    if not source_dir:
+        raise RuntimeError(
+            "Chưa có TELECODE_SOURCE_DIR (đường dẫn git checkout nguồn telecode) trong môi "
+            "trường — tính năng này chỉ dùng được trên máy dev có sẵn checkout, xem CLAUDE.md."
+        )
+    source_path = Path(source_dir)
+    if not source_path.is_dir():
+        raise RuntimeError(f"TELECODE_SOURCE_DIR không tồn tại: {source_dir}")
+
+    git_out = subprocess.run(
+        ["git", "-C", str(source_path), "pull"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if git_out.returncode != 0:
+        raise RuntimeError(f"git pull lỗi: {git_out.stderr.strip()}")
+
+    build = subprocess.run(
+        ["npm", "run", "build", "--", "--targets", "linux"],
+        cwd=str(source_path), capture_output=True, text=True, timeout=600,
+    )
+    if build.returncode != 0:
+        raise RuntimeError(f"Build lỗi: {build.stderr[-2000:]}")
+
+    deb_dir = source_path / "dist" / "linux-x64"
+    debs = sorted(deb_dir.glob("*.deb"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not debs:
+        raise RuntimeError(f"Không tìm thấy .deb mới trong {deb_dir}")
+    deb_path = debs[0]
+
+    try:
+        result = _cmdctl_exec(f'dpkg -i "{deb_path}"', sudo=True, timeout_ms=120000)
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(
+            f"Không gọi được cmdctl để cài .deb (đã chạy chưa? xem projects/cmdctl/CLAUDE.md): {e}"
+        )
+    if result.get("exitCode", 0) != 0:
+        raise RuntimeError(f"Cài .deb thất bại (exitCode={result.get('exitCode')}): {result.get('stderr')}")
+
+    # Kill + respawn detached — pattern/gotcha giống hệt k8sql (xem selfUpdate.ts):
+    # (1) -9 vì graceful shutdown có thể treo do chính request HTTP đang mở; (2) -f (khớp
+    # cmdline) vì binary Rust/PyInstaller không lộ đúng tên qua /proc/pid/comm; (3) neo ^
+    # BẮT BUỘC — thiếu neo thì chính lệnh pkill đang chạy trong script này (chứa chữ
+    # "telecode-sidecar"/"telecode" trong cmdline của nó) sẽ tự khớp và tự giết mình giữa
+    # chừng trước khi kịp respawn.
+    respawn_script = (
+        "sleep 1\n"
+        "pkill -9 -f '^[^ ]*telecode-sidecar' || true\n"
+        "pkill -9 -f '^[^ ]*telecode( --tray)?$' || true\n"
+        "sleep 2\n"
+        "DISPLAY=${DISPLAY:-:0} nohup telecode --tray >/dev/null 2>&1 &\n"
+    )
+    subprocess.Popen(["bash", "-c", respawn_script], start_new_session=True)
+
+    return {
+        "ok": True,
+        "message": f"Đã cập nhật lên bản build mới ({deb_path.name}) — ứng dụng sẽ tự khởi động lại sau vài giây.",
+    }
+
+
+def probe_status(run_dir: Path, dir_: Path) -> dict:
     """Wrapper mỏng gọi scripts/lib_status.py (dùng chung với tray.py) — giữ
     nguyên tên hàm/field cũ để không phải sửa chỗ gọi bên dưới. check_public=False
     vì UI wizard poll liên tục lúc cài đặt, không cần tốn round-trip curl public
-    mỗi lần (tray.py mới là nơi cần check_public=True để quyết định icon)."""
-    return get_status(run_dir, check_public=False)
+    mỗi lần (tray.py mới là nơi cần check_public=True để quyết định icon).
+    project_dir=dir_ — BẮT BUỘC truyền tường minh, không để get_status() tự suy ra từ
+    run_dir.parent (chỉ đúng ở CLI gốc — xem docstring get_status())."""
+    return get_status(run_dir, check_public=False, project_dir=dir_)
 
 
 def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
@@ -60,6 +147,10 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
             self.wfile.write(body)
 
         def do_GET(self):
+            # bỏ query string trước khi so khớp route — self.path giữ nguyên full path+query
+            # (BaseHTTPRequestHandler không tự tách), cần thiết từ khi main.rs (Tauri) mở URL kèm
+            # ?tauri=1 để wizard.html biết bỏ qua window.close() (xem CLAUDE.md).
+            self.path = self.path.split("?", 1)[0]
             if self.path == "/" or self.path == "":
                 body = wizard_html.encode("utf-8")
                 self.send_response(200)
@@ -68,7 +159,7 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
                 self.end_headers()
                 self.wfile.write(body)
             elif self.path == "/api/status":
-                self._send_json(200, probe_status(run_dir))
+                self._send_json(200, probe_status(run_dir, dir_))
             elif self.path == "/icon.png" and icon_bytes:
                 # Favicon riêng của wizard — không có link này thì Chrome dùng icon
                 # mặc định của nó cho cửa sổ --app=, kể cả taskbar/alt-tab (đã xác
@@ -101,6 +192,12 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
                 self._send_json(404, {"error": "not found"})
 
         def do_POST(self):
+            if self.path == "/api/self-update":
+                try:
+                    self._send_json(200, run_self_update())
+                except Exception as e:
+                    self._send_json(500, {"ok": False, "error": str(e)})
+                return
             if self.path != "/api/save":
                 self._send_json(404, {"error": "not found"})
                 return
@@ -117,7 +214,24 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
                 answers["_callerPid"] = caller_pid
             (run_dir / "wizard-answers.json").write_text(json.dumps(answers, ensure_ascii=False, indent=2))
             self._send_json(200, {"ok": True})
-            threading.Thread(target=lambda: (time.sleep(0.3), os._exit(0))).start()
+            if os.environ.get("TELECODE_MANAGED") == "1":
+                # Chạy trong Tauri: KHÔNG có tiến trình bash setup.sh nào đang chờ đọc
+                # wizard-answers.json (khác luồng CLI gốc, xem dưới) — tự spawn nền ở đây,
+                # KHÔNG tự thoát server vì cửa sổ Tauri còn cần /api/status để hiển thị
+                # tiến trình cài đặt/link VS Code sau khi xong.
+                log_dir = dir_ / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                env = dict(os.environ, TELECODE_APPLYING="1", TELECODE_RUN_DIR=str(run_dir))
+                with open(log_dir / "setup-apply.log", "ab") as log_f:
+                    subprocess.Popen(
+                        ["bash", str(dir_ / "setup.sh")],
+                        cwd=str(dir_), env=env, stdout=log_f, stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+            else:
+                # Luồng CLI gốc: setup.sh (bash) đang chạy foreground `python3 wizard.py`,
+                # đợi tiến trình này thoát để đọc file answers rồi tự tiếp tục cài đặt.
+                threading.Thread(target=lambda: (time.sleep(0.3), os._exit(0))).start()
 
     return Handler
 

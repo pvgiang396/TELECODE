@@ -96,14 +96,24 @@ fn spawn_sidecar(
     ),
     String,
 > {
-    app.shell()
+    let mut cmd = app
+        .shell()
         .sidecar("telecode-sidecar")
         .map_err(|e| format!("Không resolve được sidecar binary telecode-sidecar: {e}"))?
         .args(args)
         // wizard.py check biến này để KHÔNG tự mở thêm 1 cửa sổ trình duyệt (Tauri đã mở cửa sổ
         // native trỏ cùng URL) — xem comment trong wizard.py's main().
-        .env("TELECODE_MANAGED", "1")
-        .spawn()
+        .env("TELECODE_MANAGED", "1");
+
+    // Tính năng "Cập nhật ứng dụng" (nút 🔄) chỉ hoạt động trên máy có sẵn git checkout nguồn
+    // (giống K8SQL_SOURCE_DIR bên k8sql) — forward nguyên trạng từ env của chính tiến trình
+    // Tauri (KHÔNG hardcode path, đúng rule cross-platform ở CLAUDE.md gốc). Máy không set biến
+    // này (đa số máy user cài .deb bình thường) -> wizard.py tự báo lỗi rõ ràng khi bấm 🔄.
+    if let Ok(source_dir) = std::env::var("TELECODE_SOURCE_DIR") {
+        cmd = cmd.env("TELECODE_SOURCE_DIR", source_dir);
+    }
+
+    cmd.spawn()
         .map_err(|e| format!("Không spawn được sidecar: {e}"))
 }
 

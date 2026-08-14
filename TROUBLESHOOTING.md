@@ -72,6 +72,33 @@ ping api.telegram.org
 
 ## ❌ Common Issues & Solutions
 
+### Issue: `unexpected status 401 Unauthorized ... /v1/responses` khi chạy Codex
+
+**Symptoms:**
+- Codex reconnect 5/5 rồi báo `API key required for remote API access`
+- URL lỗi trỏ về endpoint 9Router (`.../v1/responses`)
+
+**Root causes thường gặp:**
+- `OPENAI_API_KEY` điền nhầm token Codex dạng `AQ...` (không phải API key router/OpenAI)
+- Cấu hình provider custom thiếu `env_key = "OPENAI_API_KEY"` hoặc code-server chưa nạp env mới
+
+**Fix nhanh:**
+```bash
+# 1) Chạy lại setup để nhập đúng key (sk-...)
+bash setup.sh
+
+# 2) Kiểm tra file codex config có env_key
+grep -n 'env_key = "OPENAI_API_KEY"' ~/.codex/config.toml
+
+# 3) Kiểm tra code-server env đã có OPENAI_API_KEY (setup mới sẽ tự ghi file này)
+grep -n '^OPENAI_API_KEY=' .run/code-server.env
+
+# 4) Restart code-server để nạp env mới
+systemctl --user restart code-server 2>/dev/null || true
+```
+
+Nếu vẫn lỗi, mở wizard setup và nhập lại `OPENAI_API_KEY` đúng loại key.
+
 ### Issue: "Bot no response to /start"
 
 **Symptoms:**
