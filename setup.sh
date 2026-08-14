@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Telegram VS Code Mini App - Setup tổng hợp (idempotent, chạy lại được nhiều lần)
+# Telecode - Setup tổng hợp (idempotent, chạy lại được nhiều lần)
 #
 # Thay cho việc gõ tay từng bước (cài code-server, cloudflared, tạo tunnel, sửa
 # config...), script này tự kiểm tra từng bước đã làm chưa và hỏi bạn muốn GIỮ
@@ -235,7 +235,7 @@ if [ "$HAS_GUI" = "1" ] && [ "${TELECODE_APPLYING:-0}" != "1" ]; then
 fi
 
 echo "======================================"
-echo "🚀 Telegram VS Code Mini App - Setup"
+echo "🚀 Telecode - Setup"
 echo "======================================"
 echo ""
 
@@ -490,9 +490,9 @@ echo ""
 # không có `set -e` nên các bước TRƯỚC ĐÓ đã chạy vẫn giữ nguyên nhưng các bước SAU
 # ĐIỂM CRASH không bao giờ chạy tới) từng khiến shortcut/icon KHÔNG BAO GIỜ được tạo
 # lại dù setup.sh chạy xong tới đây. Đặt các bước liên quan tới icon/shortcut CÀNG
-# SỚM CÀNG TỐT để không phụ thuộc vào các bước ít liên quan (Copilot/Tailscale/bot)
-# chạy trót lọt. Dùng luôn trên máy tính (không qua Telegram/tunnel) = mở
-# localhost:8443 thẳng, nhanh hơn nhiều vì không qua Cloudflare. Idempotent: ghi đè
+# SỚM CÀNG TỐT để không phụ thuộc vào các bước ít liên quan (Copilot/Tailscale) chạy
+# trót lọt. Dùng luôn trên máy tính (không qua tunnel) = mở localhost:8443 thẳng,
+# nhanh hơn nhiều vì không qua Cloudflare/Funnel. Idempotent: ghi đè
 # mỗi lần chạy để luôn trỏ đúng cấu hình hiện tại (không cần xoá tay trước khi tạo lại).
 # Xoá luôn shortcut tên cũ (từ bản trước khi đổi tên thành "Telecode") nếu còn sót.
 rm -f "$HOME/Desktop/code-server.desktop" "$HOME/Desktop/VS Code (code-server).command"
@@ -696,6 +696,63 @@ EOF
 ok "Đã ghi $CS_CONFIG"
 echo ""
 
+# --- 2b. Điền sẵn password vào ô đăng nhập code-server ------------------------
+# Chạy SAU khi biết CS_PASSWORD (mục 2) — trang login đã patch icon con mắt/dark
+# theme ở bước 1b/1c (patch_code_server_assets, chạy TRƯỚC mục 2 nên chưa biết
+# password) — patch thêm bước này để bản Tauri (main.rs) có thể bỏ qua modal cài
+# đặt khi đã cấu hình xong (ý 1, srs/LoiTelecode/v3.md): trang chính hiện thẳng
+# màn login code-server, ô password đã điền sẵn, user chỉ cần bấm nút đăng nhập.
+# Idempotent THEO GIÁ TRỊ (không chỉ theo marker tồn tại như patch_code_server_assets)
+# vì password có thể đổi mỗi lần chạy setup.sh — marker nhúng kèm giá trị để tự phát
+# hiện cần ghi đè lại khi user đổi password.
+patch_code_server_login_password() {
+    local root html
+    root="$(find_code_server_root)" || return
+    html="$root/src/browser/pages/login.html"
+    [ -f "$html" ] || return
+
+    grep -qF "telecode-prefill-password:$CS_PASSWORD\"" "$html" 2>/dev/null && return
+
+    local SUDO=""
+    [ -w "$html" ] || SUDO="sudo"
+    $SUDO python3 - "$html" "$CS_PASSWORD" <<'PYEOF'
+import re
+import sys
+
+html_path, password = sys.argv[1], sys.argv[2]
+with open(html_path, "r", encoding="utf-8") as f:
+    html = f.read()
+
+# Xoá khối cũ (nếu có, giá trị password trước đó) trước khi ghi khối mới.
+marker_re = re.compile(
+    r"\n?    <script>\n      // telecode-prefill-password:.*?\n    </script>\n",
+    re.S,
+)
+html = marker_re.sub("", html)
+
+escaped = password.replace("\\", "\\\\").replace('"', '\\"')
+script = (
+    "\n    <script>\n"
+    "      // telecode-prefill-password:" + password + "\n"
+    "      document.addEventListener('DOMContentLoaded', function () {\n"
+    "        var p = document.querySelector('input[name=\"password\"]');\n"
+    "        if (p) p.value = \"" + escaped + "\";\n"
+    "      });\n"
+    "    </script>\n"
+)
+if "  </body>" in html:
+    html = html.replace("  </body>", script + "  </body>", 1)
+    print("html: da dien san password")
+else:
+    print("WARN: khong tim thay </body> de dien san password")
+
+with open(html_path, "w", encoding="utf-8") as f:
+    f.write(html)
+PYEOF
+}
+patch_code_server_login_password
+echo ""
+
 # --- 3. Chạy code-server nền ----------------------------------------------
 # Chỉ mở đúng thư mục project (mặc định ~/Code), KHÔNG mở cả $HOME — mở cả $HOME
 # nghĩa là ai vào được VS Code từ điện thoại cũng duyệt/sửa được mọi file khác
@@ -793,6 +850,23 @@ if ! is_code_server_alive; then
 fi
 if [ "$USE_SYSTEMD" = "1" ]; then
     ok "code-server chạy qua systemd --user (tự restart nếu crash) — service: $CS_SERVICE"
+    # Tự bật linger để code-server chạy được ngay từ lúc máy khởi động, không cần
+    # đăng nhập trước — nhiều distro cho tự bật cho chính mình qua polkit
+    # (auth_self_keep) không cần root (đã xác nhận trên máy dev); nếu không,
+    # fallback pkexec/sudo (cùng pattern "tailscale up" ở bước 4b). (Trước đây đặt
+    # ở bước "Chạy bot" — chuyển về đây sau khi bỏ bot Telegram, vì linger áp dụng
+    # cho TOÀN BỘ service systemd --user của user, không riêng 1 service nào.)
+    if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q "Linger=yes"; then
+        if loginctl enable-linger "$(id -un)" 2>/dev/null; then
+            ok "Đã bật linger — code-server tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
+        elif command -v pkexec &>/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && pkexec loginctl enable-linger "$(id -un)" 2>/dev/null; then
+            ok "Đã bật linger (qua pkexec) — code-server tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
+        elif sudo loginctl enable-linger "$(id -un)" 2>/dev/null; then
+            ok "Đã bật linger (qua sudo) — code-server tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
+        else
+            warn "Không tự bật được linger — chạy tay 1 lần: loginctl enable-linger $(id -un) (giữ code-server chạy nền kể cả khi chưa đăng nhập)."
+        fi
+    fi
 else
     warn "code-server chạy qua nohup — không tự restart nếu crash (cần systemd --user, hiện không khả dụng trên máy này)."
 fi
@@ -801,9 +875,10 @@ echo ""
 # --- 4. Tailscale -----------------------------------------------------------
 # Thay cloudflared quick tunnel (URL *.trycloudflare.com ngẫu nhiên, đổi MỖI LẦN
 # restart) bằng Tailscale Funnel: URL public HTTPS cố định vĩnh viễn theo tên máy
-# trong tailnet (https://<hostname>.<tailnet>.ts.net) — cần thiết để bot.py (xem
-# discover_tailnet_peers()) biết được "server nào đang sống, ở URL nào" mà không
-# cần dựng thêm registry/backend riêng. Không giữ song song 2 cơ chế tunnel.
+# trong tailnet (https://<hostname>.<tailnet>.ts.net) — cần thiết để app di động
+# (frontend-placeholder/index.html) nhúng thẳng code-server qua 1 URL public ổn
+# định, không cần dựng thêm registry/backend riêng. Không giữ song song 2 cơ chế
+# tunnel.
 if command -v tailscale &>/dev/null; then
     CURRENT_VER="$(tailscale version 2>/dev/null | head -n1)"
     if [ "$(ask_choice "4) Tailscale: đã cài (${CURRENT_VER})" "tailscaleAction")" = "redo" ]; then
@@ -916,19 +991,8 @@ case "$FUNNEL_HTTP_CODE" in
 esac
 echo ""
 
-# --- 6. Telegram Bot Token ---------------------------------------------------
-# Nút bot mở THẲNG VSCODE_PUBLIC_URL (không qua iframe mini_app.html): code-server
-# đặt cookie SameSite=Lax, load trong iframe khác domain sẽ bị nhiều WebView (đặc
-# biệt iOS WKWebView của Telegram) chặn làm cookie bên thứ 3 -> đăng nhập đúng mật
-# khẩu vẫn quay lại y hệt màn login. mini_app.html vẫn còn trong repo nhưng không
-# dùng trong luồng mặc định nữa.
 CONFIG_FILE="$DIR/config.yaml"
 [ -f "$CONFIG_FILE" ] || cp "$DIR/config.example.yaml" "$CONFIG_FILE"
-CURRENT_TOKEN="$(grep '^TELEGRAM_BOT_TOKEN:' "$CONFIG_FILE" | sed -E 's/^TELEGRAM_BOT_TOKEN: *"?([^"]*)"?/\1/')"
-[ "$CURRENT_TOKEN" = "YOUR_BOT_TOKEN_HERE" ] && CURRENT_TOKEN=""
-echo "6) Token bot Telegram — lấy từ @BotFather (gửi /newbot trên điện thoại nếu chưa có)."
-BOT_TOKEN="$(ask_value "   Token" "$CURRENT_TOKEN" 1 "token")"
-echo ""
 
 # --- 6b. Codex CLI (Gemini qua 9Router) --------------------------------------
 # openai.chatgpt (Codex) có sẵn trên Open VSX (marketplace mặc định code-server)
@@ -942,7 +1006,10 @@ CURRENT_OPENAI_KEY="$(grep '^OPENAI_API_KEY:' "$CONFIG_FILE" 2>/dev/null | sed -
 echo "6b) Codex CLI qua 9Router (Gemini) — để trống nếu chưa dùng, có thể bổ sung ở lần chạy setup.sh sau."
 OPENAI_API_KEY="$(ask_value "   OPENAI_API_KEY" "$CURRENT_OPENAI_KEY" 1 "openaiApiKey")"
 if [ -n "$OPENAI_API_KEY" ] && [[ "$OPENAI_API_KEY" == AQ.* ]]; then
-    warn "   OPENAI_API_KEY đang có dạng 'AQ.*' (token Codex login), không phải API key cho 9Router."
+    error "   ❌ OPENAI_API_KEY không được là token Codex login (dạng 'AQ...')."
+    error "      Phải là API key thật từ 9Router/OpenAI (dạng 'sk-...')."
+    error "      Liên hệ team để lấy key 9Router, hoặc bỏ qua (để trống) lần này."
+    exit 1
 fi
 if [ -n "$OPENAI_API_KEY" ]; then
     echo "$INSTALLED_EXT" | grep -q '^openai\.chatgpt$' || {
@@ -1033,45 +1100,13 @@ if [ "$CS_ENV_CHANGED" = "1" ] && is_code_server_alive; then
 fi
 echo ""
 
-# --- 6d. Thư mục nhận file gửi qua Telegram -----------------------------------
-# Gửi ảnh HOẶC file bất kỳ thẳng cho bot (chat riêng) -> bot.py tự tải và lưu vào
-# đúng 1 thư mục cố định trên máy chạy telecode, để đồng bộ file từ điện thoại về
-# máy tính khi làm việc từ xa mà không cần cài thêm app đồng bộ (Syncthing/
-# Nextcloud...). Mặc định là thư mục con "files" trong $DIR (không phải chính $DIR
-# — tránh trộn file đồng bộ lẫn với source code thực thi telecode) — đổi được ở
-# đây nếu muốn trỏ nơi khác (vd 1 thư mục con trong $CODE_SERVER_WORKSPACE để mở
-# luôn trong VS Code).
-CURRENT_FILE_DIR="$(grep '^FILE_INBOX_DIR:' "$CONFIG_FILE" 2>/dev/null | sed -E 's/^FILE_INBOX_DIR: *"?([^"]*)"?/\1/')"
-[ -z "$CURRENT_FILE_DIR" ] && CURRENT_FILE_DIR="$DIR/files"
-echo "6d) Thư mục nhận ảnh/file gửi qua Telegram — mặc định: $DIR/files"
-FILE_INBOX_DIR="$(ask_value "   Thư mục nhận file" "$CURRENT_FILE_DIR" 0 "fileInboxDir")"
-mkdir -p "$FILE_INBOX_DIR" || { err "Không tạo được thư mục $FILE_INBOX_DIR"; exit 1; }
-ok "   Ảnh/file gửi qua Telegram sẽ lưu vào: $FILE_INBOX_DIR"
-echo ""
-
-# Mã claim quyền owner — giữ nguyên nếu đã có (tránh vô hiệu mã đã đưa cho người
-# dùng ở lần chạy trước mà họ chưa kịp /start), chỉ sinh mới nếu chưa từng có.
-# Không liên quan tới state.json (owner_chat_id) — mã này chỉ cần lúc CLAIM lần
-# đầu, sau khi đã claim thì state.json là nguồn sự thật, mã cũ hết tác dụng.
-CURRENT_CLAIM_CODE="$(grep '^OWNER_CLAIM_CODE:' "$CONFIG_FILE" 2>/dev/null | sed -E 's/^OWNER_CLAIM_CODE: *"?([^"]*)"?/\1/')"
-if [ -n "$CURRENT_CLAIM_CODE" ]; then
-    OWNER_CLAIM_CODE="$CURRENT_CLAIM_CODE"
-else
-    OWNER_CLAIM_CODE="$(python3 -c "import secrets; print(secrets.token_hex(4))")"
-fi
-
 # --- 7. Ghi config.yaml -------------------------------------------------------
 cat > "$CONFIG_FILE" <<EOF
-TELEGRAM_BOT_TOKEN: "$BOT_TOKEN"
 OPENAI_API_KEY: "$OPENAI_API_KEY"
 GITHUB_COPILOT_PAT: "$GITHUB_COPILOT_PAT"
-FILE_INBOX_DIR: "$FILE_INBOX_DIR"
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "$CS_PASSWORD"
 VSCODE_PUBLIC_URL: "$VSCODE_PUBLIC_URL"
-OWNER_CLAIM_CODE: "$OWNER_CLAIM_CODE"
-BOT_POLLING_INTERVAL: 30
-BOT_TIMEOUT: 30
 VSCODE_AUTH_REQUIRED: true
 VSCODE_ALLOW_INSECURE: false
 LOG_LEVEL: "INFO"
@@ -1079,86 +1114,6 @@ ENABLE_DEBUG_MODE: false
 ALLOW_MULTIPLE_CONNECTIONS: false
 EOF
 ok "Đã ghi $CONFIG_FILE"
-STATE_FILE="$DIR/state.json"
-OWNER_ALREADY_SET="$(python3 -c "
-import json
-try:
-    with open('$STATE_FILE') as f:
-        print(json.load(f).get('owner_chat_id') is not None)
-except Exception:
-    print(False)
-")"
-if [ "$OWNER_ALREADY_SET" != "True" ]; then
-    info "   👉 Bot chưa có chủ sở hữu — gửi trên Telegram: /start $OWNER_CLAIM_CODE (đúng 1 lần đầu tiên) để nhận quyền."
-fi
-echo ""
-
-# --- 7b. Khôi phục cấu hình AI tool (claude/copilot/gemini/deepseek) qua Telegram --
-# Chỉ hỏi khi chưa có sẵn các config đó trên máy này (máy đầu tiên setup xong thì bỏ
-# qua bước này) — không có API nào để bot tự "kéo" file 1 instance khác đã gửi vào
-# chat (Telegram không cho bot đọc lịch sử chat), nên vẫn cần 1 bước tay: người dùng
-# tải file .gpg Telegram gửi về rồi chạy 1 lệnh curl in sẵn để đẩy sang máy này.
-if [ ! -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$HOME/.config/github-copilot/oauth.json" ] && [ ! -f "$HOME/.gemini/oauth_creds.json" ] && [ ! -f "$HOME/.codex/auth.json" ]; then
-    echo "7b) Chưa thấy cấu hình AI tool (claude/copilot/gemini/codex) nào trên máy này."
-    read -rp "    Khôi phục từ bản sao lưu qua Telegram? (y/N): " RESTORE_ANSWER < /dev/tty
-    if [ "$RESTORE_ANSWER" = "y" ] || [ "$RESTORE_ANSWER" = "Y" ]; then
-        RECV_PORT=10099
-        RECV_OUT="$RUN_DIR/ai-configs-incoming.gpg"
-        RECV_LOG="$LOG_DIR/receive-ai-configs.log"
-        RECV_PID="$RUN_DIR/receive-ai-configs.pid"
-        rm -f "$RECV_OUT" "$RECV_LOG"
-
-        # Dùng chung Tailscale Funnel port 443 đã bật ở bước 5, thêm 1 path riêng
-        # trỏ về receiver cục bộ (không cần mở thêm port funnel mới).
-        sudo tailscale serve --bg --set-path=/telecode-ai-config-upload "http://127.0.0.1:$RECV_PORT" \
-            || warn "Không cấu hình được tailscale serve cho receiver — kiểm tra 'tailscale serve --help' và tự chạy lại lệnh cho khớp bản đã cài."
-
-        nohup python3 "$DIR/scripts/receive-ai-configs.py" "$RECV_OUT" "$RECV_PORT" > "$RECV_LOG" 2>&1 &
-        echo $! > "$RECV_PID"
-
-        UPLOAD_CODE=""
-        for _ in $(seq 1 10); do
-            UPLOAD_CODE="$(python3 -c "import json; print(json.load(open('$RECV_LOG')).get('code',''))" 2>/dev/null)"
-            [ -n "$UPLOAD_CODE" ] && break
-            sleep 0.5
-        done
-
-        if [ -z "$UPLOAD_CODE" ]; then
-            warn "Receiver không khởi động được — xem $RECV_LOG, bỏ qua bước khôi phục (đăng nhập tay các AI tool sau)."
-        else
-            echo ""
-            info "    1. Mở Telegram, gửi: /backup_configs <passphrase> cho bot (máy nguồn phải đang chạy bot.py)."
-            info "    2. Tải file .gpg bot gửi về máy đang có Telegram, rồi chạy (thay <đường-dẫn-file-vừa-tải>):"
-            echo "       curl -F \"file=@<đường-dẫn-file-vừa-tải>\" \"https://$TS_DNS_NAME/telecode-ai-config-upload?code=$UPLOAD_CODE\""
-            echo ""
-            info "    Đang chờ tối đa 5 phút... (Ctrl+C để bỏ qua, đăng nhập tay các AI tool sau)"
-            WAITED=0
-            while [ ! -s "$RECV_OUT" ] && [ $WAITED -lt 300 ] && is_alive "$RECV_PID"; do
-                sleep 3; WAITED=$((WAITED+3))
-            done
-            stop_pid "$RECV_PID"
-
-            if [ -s "$RECV_OUT" ]; then
-                read -rsp "    Nhập lại passphrase để giải mã: " RESTORE_PASSPHRASE < /dev/tty; echo ""
-                RESTORE_TMP_TAR="$(mktemp --suffix=.tar.gz)"
-                if echo "$RESTORE_PASSPHRASE" | gpg --batch --yes --decrypt --passphrase-fd 0 -o "$RESTORE_TMP_TAR" "$RECV_OUT" 2>/dev/null; then
-                    tar -xzf "$RESTORE_TMP_TAR" -C "$HOME"
-                    # Siết lại permission cho file credentials (tar giữ nguyên mode gốc,
-                    # nhưng đề phòng umask máy đích khác máy nguồn).
-                    chmod 600 "$HOME/.claude/.credentials.json" "$HOME/.claude.json" \
-                        "$HOME/.config/gh/hosts.yml" "$HOME/.config/github-copilot/oauth.json" \
-                        "$HOME/.gemini/oauth_creds.json" "$HOME/.codex/auth.json" 2>/dev/null || true
-                    ok "Đã khôi phục cấu hình AI tool."
-                else
-                    err "Giải mã thất bại — sai passphrase? File mã hoá còn ở $RECV_OUT, thử lại tay: gpg --decrypt -o out.tar.gz $RECV_OUT"
-                fi
-                shred -u "$RESTORE_TMP_TAR" 2>/dev/null || rm -f "$RESTORE_TMP_TAR"
-            else
-                warn "Không nhận được file trong thời gian chờ — bỏ qua, đăng nhập tay các AI tool sau."
-            fi
-        fi
-    fi
-fi
 echo ""
 
 # --- 8. Python venv + dependencies -------------------------------------------
@@ -1189,97 +1144,29 @@ if ! "$VENV_PY" -m pip --version &>/dev/null; then
 fi
 "$VENV_PY" -m pip install --upgrade pip -q
 "$VENV_PY" -m pip install -r "$DIR/requirements.txt" -q
-if ! "$VENV_PY" -c "import yaml, telegram, dotenv" &>/dev/null; then
+if ! "$VENV_PY" -c "import yaml, dotenv" &>/dev/null; then
     err "Cài dependency Python thất bại — kiểm tra $LOG_DIR hoặc chạy tay: $VENV_PY -m pip install -r requirements.txt"
     exit 1
 fi
 ok "Dependencies Python sẵn sàng"
 echo ""
 
-# --- 9. Chạy bot ----------------------------------------------------------------
-# Ưu tiên systemd --user (Linux có systemd) — Restart=always tự hồi sinh bot khi
-# crash vì BẤT KỲ lý do gì (không chỉ riêng lỗi session của nohup/setsid). macOS
-# hoặc máy không có systemd --user thật sự dùng -> fallback setsid+nohup như cũ
-# (chỉ chống được đúng 1 nguyên nhân: terminal/session cha bị đóng đột ngột).
-BOT_PID="$RUN_DIR/bot.pid"
+# --- 9. Dọn dẹp bot Telegram của bản cũ (không dùng nữa) ---------------------
+# telecode giờ chỉ dùng qua desktop app (Tauri) + Android app, không còn Telegram
+# Mini App/bot Telegram — máy nào từng chạy bản cũ sẽ còn service systemd --user
+# "telecode-bot" (xem git history nếu cần đối chiếu cấu hình unit cũ) cố restart
+# mãi dù bot.py đã bị xoá khỏi source (ExecStart trỏ vào file không còn tồn tại).
+# Tắt + gỡ hẳn 1 lần, idempotent (không lỗi nếu không có gì để dọn).
 BOT_SERVICE="telecode-bot"
 BOT_UNIT_FILE="$HOME/.config/systemd/user/${BOT_SERVICE}.service"
-# USE_SYSTEMD tính chung 1 lần ở đầu file (ngay sau xác định $OS) — dùng lại cho cả
-# code-server (bước 3) lẫn bot (bước này).
-
-is_bot_alive() {
-    if [ "$USE_SYSTEMD" = "1" ]; then
-        systemctl --user is-active --quiet "$BOT_SERVICE"
-    else
-        is_alive "$BOT_PID"
-    fi
-}
-
-if is_bot_alive; then
-    if [ "$(ask_choice "9) Bot: đang chạy" "botAction")" = "redo" ]; then
-        if [ "$USE_SYSTEMD" = "1" ]; then systemctl --user stop "$BOT_SERVICE"; else stop_pid "$BOT_PID"; fi
-    fi
+if [ -f "$BOT_UNIT_FILE" ]; then
+    info "9) Phát hiện service bot Telegram cũ ($BOT_SERVICE) — đang tắt và gỡ bỏ..."
+    systemctl --user disable --now "$BOT_SERVICE" 2>/dev/null || true
+    rm -f "$BOT_UNIT_FILE"
+    systemctl --user daemon-reload 2>/dev/null || true
+    ok "   Đã gỡ $BOT_SERVICE."
 fi
-if ! is_bot_alive; then
-    if [ "$USE_SYSTEMD" = "1" ]; then
-        mkdir -p "$(dirname "$BOT_UNIT_FILE")"
-        cat > "$BOT_UNIT_FILE" <<EOF
-[Unit]
-Description=Telecode Telegram Bot
-After=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$DIR
-ExecStart=$VENV_PY $DIR/bot.py
-Restart=always
-RestartSec=3
-StandardOutput=append:$LOG_DIR/bot.log
-StandardError=append:$LOG_DIR/bot.log
-
-[Install]
-WantedBy=default.target
-EOF
-        systemctl --user daemon-reload
-        systemctl --user enable --now "$BOT_SERVICE" >/dev/null 2>&1
-        sleep 1
-        if ! is_bot_alive; then
-            err "Bot (systemd) khởi động thất bại — xem: journalctl --user -u $BOT_SERVICE -n 50 --no-pager"
-            exit 1
-        fi
-        # Ghi PID thật vào $BOT_PID để wizard.py/is_alive cũ vẫn đọc được (tương
-        # thích ngược) — LƯU Ý: giá trị này lỗi thời ngay sau lần Restart=always
-        # kế tiếp, chỉ dùng để hiển thị tham khảo, không dùng để quyết định alive.
-        systemctl --user show "$BOT_SERVICE" -p MainPID --value > "$BOT_PID"
-    else
-        (cd "$DIR" && setsid nohup "$VENV_PY" bot.py > "$LOG_DIR/bot.log" 2>&1 < /dev/null & echo $! > "$BOT_PID")
-        sleep 1
-        if ! is_bot_alive; then
-            err "Bot khởi động rồi thoát ngay — xem log: $LOG_DIR/bot.log"
-            exit 1
-        fi
-    fi
-fi
-if [ "$USE_SYSTEMD" = "1" ]; then
-    ok "Bot đang chạy qua systemd --user (tự restart nếu crash) — service: $BOT_SERVICE"
-    if ! loginctl show-user "$(id -un)" 2>/dev/null | grep -q "Linger=yes"; then
-        # Tự bật linger để code-server/bot chạy được ngay từ lúc máy khởi động,
-        # không cần đăng nhập trước — nhiều distro cho tự bật cho chính mình qua
-        # polkit (auth_self_keep) không cần root (đã xác nhận trên máy dev); nếu
-        # không, fallback pkexec/sudo (cùng pattern "tailscale up" ở bước 4b).
-        if loginctl enable-linger "$(id -un)" 2>/dev/null; then
-            ok "Đã bật linger — code-server/bot tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
-        elif command -v pkexec &>/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && pkexec loginctl enable-linger "$(id -un)" 2>/dev/null; then
-            ok "Đã bật linger (qua pkexec) — code-server/bot tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
-        elif sudo loginctl enable-linger "$(id -un)" 2>/dev/null; then
-            ok "Đã bật linger (qua sudo) — code-server/bot tự chạy ngay từ lúc khởi động máy, không cần đăng nhập."
-        else
-            warn "Không tự bật được linger — chạy tay 1 lần: loginctl enable-linger $(id -un) (giữ bot/code-server chạy nền kể cả khi chưa đăng nhập)."
-        fi
-    fi
-else
-    ok "Bot đang chạy (PID $(cat "$BOT_PID")) — không tự restart nếu crash (cần systemd --user, hiện không khả dụng trên máy này)."
-fi
+rm -f "$RUN_DIR/bot.pid"
 echo ""
 
 # --- 9b. Tray icon trạng thái (tray.py) --------------------------------------
@@ -1359,7 +1246,7 @@ echo "======================================"
 ok "Setup xong!"
 echo "======================================"
 echo ""
-echo "📱 Trên điện thoại: mở Telegram → tìm bot của bạn → bấm nút '🔧 VS Code' cạnh khung nhập tin nhắn"
+echo "📱 Trên điện thoại: mở app Telecode → bấm ⚙️ → nhập URL bên dưới để kết nối"
 echo "🔗 VS Code URL: $VSCODE_PUBLIC_URL"
 echo "📄 Log: $LOG_DIR/"
 echo ""
