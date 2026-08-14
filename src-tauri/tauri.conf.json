@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "telecode",
+  "version": "0.1.0",
+  "identifier": "com.pvgiang396.telecode",
+  "build": {
+    "frontendDist": "./frontend-placeholder"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../bot.py": "src/bot.py",
+      "../wizard.py": "src/wizard.py",
+      "../setup.sh": "src/setup.sh",
+      "../requirements.txt": "src/requirements.txt",
+      "../config.example.yaml": "src/config.example.yaml",
+      "../scripts": "src/scripts",
+      "../assets": "src/assets"
+    }
+  }
+}

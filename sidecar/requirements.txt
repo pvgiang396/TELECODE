@@ -1,0 +1,10 @@
+# Deps của dispatcher.py để PyInstaller đóng gói — PHẢI khớp requirements.txt gốc
+# (root, dùng bởi setup.sh cho venv) cho các thư viện mà bot.py/wizard.py/lib_status.py
+# thực sự import, vì dispatcher chạy chúng qua runpy (không import tĩnh nên PyInstaller
+# không tự dò được — xem --hidden-import trong scripts/build-pyinstaller.mjs).
+# KHÔNG cần pystray/Pillow (tray.py) — Tauri cung cấp tray native, không dùng tray.py nữa.
+pyyaml==6.0
+python-telegram-bot==20.0
+python-dotenv==1.0.0
+aiohttp==3.9.0
+pyinstaller>=6.0

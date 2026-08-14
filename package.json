@@ -1,0 +1,13 @@
+{
+  "name": "telecode-workspace",
+  "version": "0.1.0",
+  "description": "Root orchestrator scripts cho telecode (build đa nền tảng) — KHÔNG phải package chính, xem sidecar/ cho backend Python và src-tauri/Cargo.toml cho shell Rust.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-cross-platform.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

@@ -3,17 +3,30 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Cài đặt telecode</title>
+<title>telecode</title>
 <link rel="icon" href="/icon.png" />
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 24px; min-height: 100vh;
+    margin: 0; min-height: 100vh;
     background: #1e1e1e; color: #e5e5e5;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    display: flex; justify-content: center;
   }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px; border-bottom: 1px solid #3c3c3c; background: #252526;
+  }
+  header .header-left { display: flex; align-items: center; gap: 8px; }
+  header .header-left .logo { font-size: 18px; }
+  header .header-left h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .header-actions { display: flex; align-items: center; gap: 4px; }
+  header .icon-btn {
+    background: none; border: none; cursor: pointer; font-size: 16px;
+    padding: 6px 8px; border-radius: 6px; color: #e5e5e5; line-height: 1;
+  }
+  header .icon-btn:hover { background: #3c3c3c; }
+  main.main-content { padding: 40px 24px; text-align: center; color: #9a9a9a; font-size: 13px; }
   .card { width: 100%; max-width: 560px; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .sub { color: #9a9a9a; font-size: 13px; margin-bottom: 24px; }
@@ -64,21 +77,58 @@
   .sub-item { padding: 10px 0; border-top: 1px solid #3c3c3c; }
   .sub-item:first-child { border-top: none; }
   .sub-item h3 { font-size: 13px; margin: 0 0 8px; color: #cfcfcf; font-weight: 600; }
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
+    align-items: flex-start; justify-content: center; padding: 24px; overflow-y: auto; z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    width: 100%; max-width: 560px; background: #1e1e1e; border: 1px solid #3c3c3c;
+    border-radius: 10px; padding: 24px;
+  }
+  .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .modal-header h1 { flex: 1; }
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>🚀 Cài đặt telecode</h1>
-    <div class="sub">Chọn xong bấm "Bắt đầu cài đặt" — terminal sẽ tự tiếp tục ở nền rồi tự đóng khi xong.</div>
-    <div id="loading">Đang kiểm tra trạng thái máy...</div>
-    <form id="form" style="display:none"></form>
-    <div id="msg"></div>
+  <header>
+    <div class="header-left">
+      <span class="logo">🚀</span>
+      <h1>telecode</h1>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="btnSettings" class="icon-btn" title="Cấu hình cài đặt">⚙️</button>
+    </div>
+  </header>
+
+  <main class="main-content">
+    Dùng icon ⚙️ ở góc trên để mở lại "CẤU HÌNH CÀI ĐẶT".
+  </main>
+
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal-box card">
+      <div class="modal-header">
+        <h1>⚙️ CẤU HÌNH CÀI ĐẶT</h1>
+        <button type="button" id="closeSettings" class="icon-btn" title="Đóng">✕</button>
+      </div>
+      <div class="sub">Chọn xong bấm "Bắt đầu cài đặt" — terminal sẽ tự tiếp tục ở nền rồi tự đóng khi xong.</div>
+      <div id="loading">Đang kiểm tra trạng thái máy...</div>
+      <form id="form" style="display:none"></form>
+      <div id="msg"></div>
+    </div>
   </div>
 
 <script>
 const form = document.getElementById('form');
 const loading = document.getElementById('loading');
 const msg = document.getElementById('msg');
+const settingsModal = document.getElementById('settingsModal');
+
+function openSettings() { settingsModal.classList.add('open'); }
+function closeSettingsModal() { settingsModal.classList.remove('open'); }
+
+document.getElementById('btnSettings').addEventListener('click', openSettings);
+document.getElementById('closeSettings').addEventListener('click', closeSettingsModal);
 
 function radioGroup(name, label, current) {
   return `<div class="step">
@@ -182,6 +232,7 @@ fetch('/api/status').then(r => r.json()).then(s => {
   form.innerHTML = html;
   loading.style.display = 'none';
   form.style.display = 'block';
+  openSettings();
 
   document.getElementById('togglePw').addEventListener('click', () => {
     const p = document.getElementById('password');
@@ -224,6 +275,7 @@ fetch('/api/status').then(r => r.json()).then(s => {
   });
 }).catch(() => {
   loading.textContent = 'Không lấy được trạng thái máy — kiểm tra lại terminal.';
+  openSettings();
 });
 
 // Chặn chuột phải để giống 1 app desktop thật (mở kèm --app= ẩn sẵn thanh địa chỉ)

@@ -1,0 +1,17 @@
+[package]
+name = "telecode"
+version = "0.1.0"
+description = "Desktop shell cho telecode — Tauri + Python sidecar (PyInstaller), kế thừa nguyên vẹn bot.py/wizard.py/setup.sh từ telecode"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-autostart = "2"
+# Đóng cửa sổ giờ chỉ ẩn (không thoát) — nếu không có guard này, bấm icon desktop lần 2 trong lúc
+# app đã chạy nền sẽ spawn thêm 1 cặp sidecar (wizard-server + bot) tranh chấp cùng config.yaml/
+# port 8899/systemd unit bot.py. Cùng pattern k8sql (xem k8sql/CLAUDE.md Phase 8).
+tauri-plugin-single-instance = "2"

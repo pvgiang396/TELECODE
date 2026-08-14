@@ -186,7 +186,12 @@ def main():
     server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), make_handler(run_dir, dir_, caller_pid))
     url = f"http://127.0.0.1:{PORT}/"
     print(f"✅ Wizard đang chạy tại {url}")
-    threading.Timer(0.5, lambda: open_browser_plain(url)).start()
+    # telecode (Tauri shell) đã tự mở 1 cửa sổ native trỏ vào URL này — tự mở thêm 1 trình duyệt
+    # ở đây sẽ ra 2 cửa sổ trùng lặp. Đặt TELECODE_MANAGED=1 (dispatcher.py không set biến này —
+    # chỉ Rust side set khi spawn qua sidecar) để bỏ qua bước tự mở trình duyệt; chạy độc lập qua
+    # CLI như telecode gốc (không có biến này) thì hành vi giữ nguyên y hệt.
+    if os.environ.get("TELECODE_MANAGED") != "1":
+        threading.Timer(0.5, lambda: open_browser_plain(url)).start()
     server.serve_forever()
 
 
