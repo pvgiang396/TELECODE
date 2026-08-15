@@ -10,10 +10,12 @@ trong workspace, không còn thư mục/tên gọi tạm ở trên.
 
 ## Vai trò
 
-telecode là bản đóng gói desktop-app thật (Tauri, cài đặt 1 click), mở VS Code (code-server) từ xa
-qua Telegram Mini App. Kế thừa **gần như nguyên vẹn** toàn bộ business logic Python/Bash gốc
-(`bot.py`, `wizard.py`, `setup.sh`, `scripts/lib_status.py`, `scripts/reconnect.sh`) — chỉ đổi lớp
-vỏ cài đặt/khởi chạy, theo đúng pattern đã dùng khi chuyển `k8sctl` → [`k8sql`](../k8sql/CLAUDE.md).
+telecode là bản đóng gói desktop-app thật (Tauri, cài đặt 1 click) + app Android riêng, mở VS Code
+(code-server) từ xa qua Tailscale Funnel. Kế thừa **gần như nguyên vẹn** toàn bộ business logic
+Python/Bash gốc (`wizard.py`, `setup.sh`, `scripts/lib_status.py`, `scripts/reconnect.sh`) — chỉ đổi
+lớp vỏ cài đặt/khởi chạy, theo đúng pattern đã dùng khi chuyển `k8sctl` → [`k8sql`](../k8sql/CLAUDE.md).
+Đã dọn sạch toàn bộ subsystem bot Telegram/Mini App cũ (không còn dùng) — xem mục "Dọn dẹp bot
+Telegram" gần cuối file.
 
 ## Khác biệt kiến trúc so với k8sql (đọc trước khi sửa)
 
@@ -26,7 +28,7 @@ là **Python + Bash**, không có tương đương — dẫn tới 2 khác biệ
 2. **Windows KHÔNG có sidecar Python riêng** — thay vào đó gọi qua `wsl.exe`, tái dùng ĐÚNG binary
    Linux đã build, chạy BÊN TRONG WSL2 (`src-tauri/src/wsl_bridge.rs`). Đây không phải hạn chế mới:
    telecode gốc trên Windows *vốn đã* yêu cầu WSL2 (`install.ps1` tự cài WSL2 rồi chạy toàn bộ
-   `setup.sh`/`bot.py` bên trong đó, vì code-server chưa từng chạy native Windows).
+   `setup.sh` bên trong đó, vì code-server chưa từng chạy native Windows).
 
 ## Kiến trúc
 
@@ -39,10 +41,10 @@ telecode/
 ├── docker/windows-cross.Dockerfile  # Rust+mingw+nsis, KHÔNG build sidecar (xem trên)
 ├── sidecar/
 │   ├── dispatcher.py              # entrypoint PyInstaller đóng gói — xem docstring, giải thích
-│   │                              #   TẠI SAO không `import` tĩnh bot.py/wizard.py
-│   ├── requirements.txt           # deps để PyInstaller bundle (khớp deps thật bot.py/wizard.py dùng)
+│   │                              #   TẠI SAO không `import` tĩnh wizard.py
+│   ├── requirements.txt           # deps để PyInstaller bundle (khớp deps thật wizard.py dùng)
 │   └── scripts/build-pyinstaller.mjs
-├── bot.py, wizard.py, setup.sh, scripts/, assets/, requirements.txt, tray.py
+├── wizard.py, setup.sh, scripts/, assets/, requirements.txt, tray.py
 │                                  # NGUYÊN VẸN từ telecode — KHÔNG sửa nghiệp vụ (1 ngoại lệ nhỏ,
 │                                  #   xem "Thay đổi tối thiểu" bên dưới). tray.py không dùng nữa
 │                                  #   (Tauri có tray native) nhưng giữ lại tham khảo.
@@ -58,8 +60,8 @@ telecode/
 
 ## Cách hoạt động lúc chạy (đã tự verify trên Linux, xem "Đã verify" bên dưới)
 
-1. `main.rs` tạo tray (Open/Exit) + copy `bundle.resources` (bot.py/wizard.py/setup.sh/scripts/
-   assets, khai trong `tauri.conf.json`) từ vị trí chỉ-đọc (vd `/usr/lib/telecode/src/` trên
+1. `main.rs` tạo tray (Open/Exit) + copy `bundle.resources` (wizard.py/setup.sh/scripts/assets,
+   khai trong `tauri.conf.json`) từ vị trí chỉ-đọc (vd `/usr/lib/telecode/src/` trên
    `.deb` đã cài) sang `app_data_dir()/source` (ghi được) — lần đầu copy toàn bộ, các lần sau tái
    dùng bản copy này NHƯNG tự đồng bộ lại nếu version bundle đổi (xem "Cơ chế versioning cache +
    tính năng Cập nhật ứng dụng" bên dưới) (`resolve_writable_source_dir()`). Lý do bắt buộc: `setup.sh`
@@ -70,12 +72,9 @@ telecode/
    nén PyInstaller (`sys._MEIPASS`) — cùng lớp bug k8sql từng gặp với `__dirname` trong Node SEA.
 3. Đợi cổng `8899` (PORT cố định trong wizard.py, không tham số hoá) mở, tạo cửa sổ Tauri
    `WebviewUrl::External("http://127.0.0.1:8899/")` — UI y hệt `assets/wizard.html` cũ, không đổi
-   1 dòng HTML/CSS/JS.
-4. Spawn sidecar `bot <path-tới-bot.py-thật>` song song — tiến trình polling Telegram, không có
-   HTTP endpoint nên không health-check, chỉ log stdout/stderr. Lỗi "TELEGRAM_BOT_TOKEN is required"
-   khi CHƯA chạy `setup.sh`/chưa có `config.yaml` là **hành vi đúng, không phải bug** — đúng validate
-   gốc của `bot.py` không đổi.
-5. `setup.sh` (cài code-server/Tailscale/systemd units, patch code-server login/favicon...) **giữ
+   1 dòng HTML/CSS/JS. Chỉ còn ĐÚNG 1 sidecar (`wizard-server`) — trước đây có thêm sidecar `bot`
+   (bot Telegram), đã bỏ hẳn (xem "Dọn dẹp bot Telegram" gần cuối file).
+4. `setup.sh` (cài code-server/Tailscale/systemd units, patch code-server login/favicon...) **giữ
    nguyên là bước cài đặt riêng, KHÔNG chạy tự động bởi Tauri** — user tự chạy `bash setup.sh` (từ
    bản copy tại `app_data_dir()/source/setup.sh`, hoặc trực tiếp trong wizard UI như telecode cũ)
    như quy trình gốc.
@@ -147,7 +146,10 @@ build-native.mjs` tiêm `externalBin` qua flag `--config` CHỈ khi build cho pl
 
 ## Chưa làm (ngoài phạm vi lần triển khai này)
 
-- CI thật (GitLab runner build tự động) — build hiện chỉ chạy local qua `npm run build`.
+- CI GitHub Actions public đã thêm tại `.github/workflows/build.yml`: build Linux/Windows/macOS
+  desktop và Android/iOS theo input `targets`; CLI `npm run build` dispatch target macOS/Android/iOS
+  qua `gh`, rồi tải artifact về `dist/github-actions/<run-id>/`. Mặc định repo là
+  `pvgiang396/TELECODE`, có thể đổi bằng `GITHUB_REPOSITORY`.
 - macOS — không cross-compile được từ Linux (giới hạn Apple), cần máy Mac thật.
 
 ## Cấu hình UI (2026-08-14)
@@ -241,7 +243,7 @@ build-native.mjs` tiêm `externalBin` qua flag `--config` CHỈ khi build cho pl
   - `main.rs`'s `resolve_writable_source_dir()` giờ ghi kèm marker `dest/.bundle-version` (version
     app lúc copy). Mỗi lần khởi động, nếu marker khác `app.package_info().version` hiện tại (tức
     vừa `dpkg -i` bản `.deb` mới hơn) → gọi lại `copy_dir_recursive(bundled_src, dest)` đồng bộ lại
-    toàn bộ file "code" (`bot.py`/`wizard.py`/`setup.sh`/`scripts/`/`assets/`...) — **an toàn với
+    toàn bộ file "code" (`wizard.py`/`setup.sh`/`scripts/`/`assets/`...) — **an toàn với
     state user** vì hàm chỉ duyệt theo `bundled_src` (không có `config.yaml`/`.env`/`venv/`/`logs/`
     trong đó) nên các file/thư mục đó ở `dest` không bị đụng tới.
   - Nút 🔄 (`wizard.html`) gọi `POST /api/self-update` (endpoint mới trong `wizard.py`,
@@ -304,6 +306,10 @@ armv7-linux-androideabi i686-linux-android x86_64-linux-android`. `ANDROID_HOME`
 vào `~/.bashrc` (không hardcode trong repo — máy khác cần tự set biến này theo path SDK của họ,
 đúng rule cross-platform).
 
+Android build yêu cầu Cargo/Rust mới có hỗ trợ Edition 2024. Máy dùng Cargo hệ thống `1.75`
+sẽ lỗi khi đọc dependency `dlopen2_derive`; `scripts/build-android.mjs` tự ưu tiên Cargo trong
+`$HOME/.cargo/bin` (rustup) trước `/usr/bin` để dùng toolchain đã cài qua rustup.
+
 **Bug thật đã gặp + fix — `npm run tauri` không tồn tại**: template Gradle Tauri tự sinh
 (`gen/android/buildSrc/.../BuildTask.kt`) chạy `npm run -- tauri android android-studio-script`
 tại thư mục `src-tauri` (không có `package.json` riêng, npm tự tìm lên `package.json` gốc
@@ -312,19 +318,42 @@ workspace) — gốc `telecode-workspace`'s `package.json` trước đây chỉ 
 thêm script này vào `package.json` gốc — không ảnh hưởng `npm run build` (build-cross-platform.mjs)
 hiện có.
 
-**Lệnh build**: `cd src-tauri && npx tauri android init` (sinh `gen/android/`, gitignored — đã có
-sẵn trong `.gitignore`'s `src-tauri/gen/`) rồi `npx tauri android build --debug --target aarch64`
-→ ra `gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk` (~114MB, debug
-build chưa optimize/strip — build `--release` sẽ nhỏ hơn nhiều, cần keystore ký mới cài được ngoài
-`adb install`). Đã tự verify: `aapt dump badging` xác nhận đúng
-`package: com.pvgiang396.telecode`, `application-label: 'Telecode'`, permission `INTERNET` — build
-thành công thật, **chưa cài/chạy thử trên điện thoại Android thật** (không có thiết bị/emulator
-lúc làm việc) — cần user tự `adb install` hoặc chuyển file `.apk` (đã copy 1 bản vào
-`dist/android/Telecode_0.1.0_debug.apk`, thư mục `dist/` gitignored) rồi tự verify AskUserQuestion
-hiện đúng.
+**Lệnh build — dùng `npm run build:android` để tự chạy đúng thứ tự 4 bước (tránh bỏ sót patch
+cookie):**
 
-**Chưa làm**: build `--release` (cần keystore ký), publish lên Play Store (không cần thiết cho
-dùng cá nhân, cài trực tiếp `.apk` đủ dùng).
+1. `cd src-tauri && npx tauri android init` (sinh `gen/android/`, gitignored — đã có sẵn trong
+   `.gitignore`'s `src-tauri/gen/`).
+2. `node ../scripts/patch-android-webview.mjs` (từ `src-tauri/`, hoặc `node scripts/patch-android-webview.mjs`
+   từ root project) — bật `CookieManager.setAcceptThirdPartyCookies` cho WebView, xem "Bug đã fix —
+   đăng nhập code-server trên mobile không giữ session" bên dưới. THIẾU bước này: đăng nhập
+   code-server trong app luôn bị đá về `/login` dù nhập đúng password.
+3. `npx tauri icon assets/icon.png` — nạp icon telecode thật vào Android, xem "Bug đã fix — icon
+   Android vẫn là icon mặc định Tauri" bên dưới. THIẾU bước này: launcher icon ra icon vô cực
+   vàng/xanh mặc định của template Tauri.
+4. `cd src-tauri && npx tauri android build` — build APK sau khi patch cookie và icon đã được áp dụng.
+
+Chạy toàn bộ từ thư mục `telecode` bằng `npm run build:android`; script luôn chạy lại `android init`,
+patch cookie và nạp icon trước khi build, không phụ thuộc trạng thái thư mục `gen/android/`.
+
+Sau đó `npx tauri android build --debug --target aarch64` → ra APK trong
+`gen/android/app/build/outputs/apk/`; `npm run build:android` tự copy các APK tìm được vào
+`dist/android/` với tên `Telecode_<tên-gốc>.apk` (debug build chưa optimize/strip nên khá nặng;
+build `--release` nhỏ hơn nhiều và script tự ký bằng keystore phát triển tại
+`~/.android/telecode-debug.keystore` để cài trực tiếp). Khi phát hành chính thức, đặt
+`TELECODE_ANDROID_KEYSTORE`, `TELECODE_ANDROID_KEY_ALIAS`, `TELECODE_ANDROID_KEYSTORE_PASSWORD`
+và `TELECODE_ANDROID_KEY_PASSWORD` trước khi build. Bước 2/3 chỉ cần chạy LẠI khi `gen/android/` bị xoá/`android init` chạy lại (file
+đích bị tauri-cli ghi đè hoàn toàn mỗi lần init) — build lại bình thường (không init lại) thì patch
+vẫn còn nguyên, không cần lặp lại.
+
+Đã tự verify: `aapt dump badging` xác nhận đúng `package: com.pvgiang396.telecode`,
+`application-label: 'Telecode'`, permission `INTERNET`, icon `mipmap-anydpi-v26/ic_launcher.xml`
+đúng icon telecode — build thành công thật; đã cài thử trên điện thoại Android thật nhiều lần
+(2026-08-14, xem "Bug đã fix" bên dưới) — vẫn **chưa tự xác nhận được lần cài mới nhất (kèm fix
+cookie + màn hình cài đặt full-page) trên điện thoại thật**, môi trường này không có thiết bị/adb
+kết nối lúc làm — user tự cài `.apk` mới nhất ở `dist/android/Telecode_0.1.0_debug.apk` rồi báo lại.
+
+**Chưa làm**: publish lên Play Store (không cần thiết cho dùng cá nhân, cài trực tiếp `.apk` đủ
+dùng).
 
 ## iOS — cần build trên máy Mac thật (chưa tự làm, chỉ chuẩn bị sẵn code)
 
@@ -350,6 +379,113 @@ cross-compile, iOS không có đường vòng tương đương).
    lại, hoặc publish lên TestFlight/App Store).
 7. Build release archive (khi cần bản chính thức): `npx tauri ios build` — cần Team ID/certificate
    hợp lệ (trả phí) mới ký + xuất `.ipa` cài ngoài Xcode được.
+
+## Bug đã fix (2026-08-14, phiên feedback thật đầu tiên từ thiết bị) — `srs/LoiTelecode/v3.md`
+
+1. **Popup cài đặt che màn hình mỗi lần mở app dù đã cấu hình xong**: `assets/wizard.html` trước
+   đây LUÔN tự gọi `openSettings()` sau khi fetch `/api/status`, bất kể đã lưu token/password từ
+   trước hay chưa. Fix: chỉ tự mở modal khi `!s.currentToken || !s.currentPassword` (chưa cấu hình
+   lần nào) — đã cấu hình rồi thì hiện thẳng trang chính (login code-server thật nếu chưa đăng
+   nhập, hoặc iframe VS Code nếu đã chạy); modal vẫn mở tay được qua nút ⚙️.
+2. **Điền sẵn password vào ô đăng nhập code-server**: thêm hàm mới
+   `patch_code_server_login_password()` trong `setup.sh` (mục 2b, chạy SAU khi biết `$CS_PASSWORD`
+   ở mục 2 — tách khỏi `patch_code_server_assets()` vì hàm đó chạy TRƯỚC khi biết password) — chèn
+   `<script>` set `value` cho `input[name="password"]` trong `login.html`. Idempotent THEO GIÁ TRỊ
+   (marker nhúng kèm password) chứ không chỉ theo tồn tại, để đổi password ở lần chạy `setup.sh` kế
+   tiếp vẫn ghi đè đúng.
+3. **Tray icon không đổi màu theo trạng thái (`scripts/lib_status.py`'s `overall_ok()` viết sẵn từ
+   trước nhưng chưa từng được dùng)**: `wizard.py` thêm route `/api/tray-status` (tách khỏi
+   `/api/status` vì cần `check_public=True` — curl thật ra Funnel public URL, tốn round-trip nên
+   không dùng chung với `/api/status` vốn cần trả nhanh cho UI poll liên tục). `src-tauri/src/main.rs`
+   giữ lại `TrayIcon` handle (trước đây bị drop ngay sau `.build(app)?`), thêm `poll_tray_status()`
+   chạy trên 1 thread riêng, poll route trên mỗi 10s, đổi `tray-icon-on.png`/`tray-icon-off.png`
+   (đã có sẵn từ trước, sinh bởi `assets/gen_tray_icons.py`, chỉ chưa wire). Cần thêm feature
+   `image-png` cho crate `tauri` trong `Cargo.toml` (`Image::from_path` bị feature-gate).
+4. **Icon Android vẫn là icon mặc định Tauri (logo vàng/xanh vô cực) thay vì icon telecode thật**:
+   root cause — `npx tauri icon assets/icon.png` (sinh `src-tauri/icons/`) chạy TRƯỚC khi
+   `gen/android/` tồn tại nên bỏ qua phần sinh icon mobile; `npx tauri android init` sau đó tự tạo
+   icon mobile mặc định vì không có nguồn icon android nào. Fix: chạy LẠI `npx tauri icon
+   assets/icon.png` sau khi `gen/android/` đã init — lệnh này phát hiện thư mục và ghi đè đúng
+   `ic_launcher*.png` mọi mipmap density. `gen/android/` gitignored nên bước này phải làm LẠI mỗi
+   máy/checkout mới build — đã ghi vào "Lệnh build" ở trên để không lặp lại bug.
+5. **Nút tải lại trong app di động**: `src-tauri/frontend-placeholder/index.html` thêm nút 🔄 cạnh
+   ⚙️ (ép `frame.src = 'about:blank'` rồi gán lại URL thật — không chỉ gán lại y hệt src cũ vì có
+   thể bị coi là "cùng URL, không cần load lại").
+6. **`ERR_CONNECTION_CLOSED` lúc mở app lần đầu trên điện thoại**: sau khi user thử lại nhiều lần
+   (mạng khác nhau, cả Wifi lẫn 4G) và sau đó tự vào được tới màn login code-server ở lần thử kế
+   tiếp — kết luận đây là Funnel/mạng gián đoạn TẠM THỜI đúng lúc test lần đầu, không phải lỗi cấu
+   hình/code (đã xác nhận Funnel/tailscaled hoạt động bình thường từ trước). Không cần sửa gì thêm
+   cho riêng triệu chứng này — xem mục 7 bên dưới cho bug THẬT SỰ chặn luồng đăng nhập phát hiện sau
+   khi qua được màn hình này.
+7. **Bug nghiêm trọng — đăng nhập code-server trên mobile không giữ session (nhập đúng password vẫn
+   bị đá về `/login`, ô password bị xoá)**: root cause xác nhận qua đọc thẳng source `wry`
+   (`~/.cargo/registry/.../wry-0.55.1/src/android/kotlin/RustWebView.kt`, template tauri-cli dùng
+   sinh `gen/android/.../generated/RustWebView.kt`) — Android WebView mặc định CHẶN cookie bên thứ 3
+   (khác hẳn desktop WebKitGTK), mà `frontend-placeholder/index.html` nhúng code-server (origin
+   khác) trong `<iframe>` bên trong trang top-level của app → đúng bối cảnh cookie bên thứ 3. Server
+   xác thực đúng password, set session cookie, nhưng WebView từ chối lưu (âm thầm, không báo lỗi) →
+   request tiếp theo vẫn coi chưa đăng nhập → quay lại `/login`. Frontend mobile hiện mở URL
+   code-server top-level thay vì iframe để cookie đăng nhập là first-party; patch cookie vẫn giữ
+   cho các WebView cũ. Không có config chính thức nào
+   trong `tauri.conf.json` để bật cờ này (đã grep toàn bộ source `tauri`/`tauri-utils` xác nhận
+   không tồn tại) — fix bằng script mới `scripts/patch-android-webview.mjs` (idempotent, tìm
+   `RustWebView.kt` qua glob) chèn `CookieManager.getInstance().setAcceptThirdPartyCookies(this,
+   true)` vào `init {}` — file này bị tauri-cli ghi đè hoàn toàn mỗi lần `android init` nên PHẢI
+   chạy lại script sau mỗi lần init, đã ghi vào "Lệnh build" ở trên (bước 2/3).
+8. **Màn hình "Kết nối máy" vẫn dính sát mép trên dù đã fix padding ở mục 5 phiên trước**: root
+   cause thật — fix `env(safe-area-inset-top)` trước đó chỉ áp cho `header` (thanh header màn hình
+   CHÍNH), nhưng màn hình user thấy khi CHƯA kết nối là `.modal-overlay`/`#settingsModal` (1 element
+   HOÀN TOÀN KHÁC, `position:fixed;inset:0` che phủ luôn `header`, tự căn
+   `align-items:flex-start;padding:24px` không hề có safe-area) — sửa nhầm chỗ vì không nhận ra
+   modal che mất header ở đúng màn hình test. Fix: bỏ hẳn kiểu popup/modal (backdrop mờ + hộp nổi
+   giữa trang), đổi `#settingsModal` thành `#settingsScreen` — 1 màn hình toàn trang riêng (`.screen`,
+   không dimming/backdrop) với header/safe-area riêng (dùng lại đúng style `header`) + nội dung căn
+   giữa dọc (`.screen-body{display:flex;align-items:center;justify-content:center}`), đúng bố cục
+   màn login code-server user dùng làm tham chiếu. Thêm nút back (←) trong header màn cài đặt — chỉ
+   hiện khi ĐÃ từng kết nối trước đó (có gì để quay về); lần mở đầu tiên (chưa từng kết nối) ẩn nút
+   back, giống màn login không có nút back.
+
+## Cleanup Codex writer lock khi mở Telecode (2026-08-15)
+
+Codex lưu lock writer theo thread tại `~/.codex/thread-writer-locks/`. Khi webview/Telecode cũ
+thoát bất thường, lock file có thể còn lại và lần mở session cũ sau đó báo `already has an active
+writer`, dẫn tới khung chat chớp liên tục. `wizard.py` gọi
+`scripts/cleanup_codex_writers.py` ngay khi `wizard-server` khởi động. Script chỉ xóa lock mà nó
+giành được `flock(LOCK_EX|LOCK_NB)`; lock đang được app-server sống giữ sẽ không bị xóa hoặc kill.
+`.coordination.lock` luôn được bỏ qua vì là lock điều phối chung của Codex.
+
+## Dọn dẹp bot Telegram (2026-08-14, phiên sau)
+
+Không còn dùng Telegram Mini App/bot Telegram nữa (chỉ dùng qua desktop app + Android app) — đã xoá
+sạch subsystem này:
+
+- **Xoá hẳn**: `bot.py`, `mini_app.html`, `Dockerfile.bot`, `docker-compose.yml`, `nginx.conf`,
+  `scripts/backup-ai-configs.sh`, `scripts/receive-ai-configs.py` (2 script cuối chỉ phục vụ đúng
+  luồng khôi phục AI config qua Telegram, không còn cách nào trigger sau khi bỏ bot).
+- **Sửa (giữ phần dùng chung)**: `src-tauri/src/sidecar.rs`/`wsl_bridge.rs` (bỏ spawn sidecar `bot`,
+  chỉ còn `wizard-server`), `sidecar/dispatcher.py`/`build-pyinstaller.mjs` (bỏ subcommand `bot` +
+  hidden-import `telegram`), `tauri.conf.json` (bỏ resource `bot.py`), `requirements.txt`/
+  `sidecar/requirements.txt` (bỏ `python-telegram-bot`), `scripts/lib_status.py` (bỏ
+  `botRunning`/`botPid`/`currentToken`/`currentFileInboxDir`, `overall_ok()` bỏ điều kiện
+  `botRunning`), `assets/wizard.html` (bỏ field token/file-inbox, gate popup đổi thành
+  `!s.currentPassword` — **lưu ý các đoạn "Bug đã fix" phía trên có nhắc `currentToken` là mô tả
+  ĐÚNG TẠI THỜI ĐIỂM VIẾT, đã lỗi thời sau thay đổi này, không sửa lại lịch sử**), `setup.sh` (xoá
+  mục Telegram Bot Token/FILE_INBOX_DIR/khôi phục AI config qua Telegram/chạy bot; thêm bước tự tắt+gỡ
+  service `telecode-bot` cũ cho máy nâng cấp; di chuyển logic bật `loginctl enable-linger` từ bước
+  "chạy bot" sang bước chạy code-server vì linger áp dụng cho toàn bộ systemd --user của user, không
+  riêng 1 service), `config.example.yaml`/`.env.example` (bỏ field bot, sửa luôn phần Cloudflare/Ngrok
+  lỗi thời thành Tailscale Funnel), `scripts/reconnect.sh` (bỏ restart `telecode-bot`/`bot.py` —
+  **bug thật, không chỉ doc**: script này sẽ fail/no-op vô ích nếu không xoá vì service/file không
+  còn tồn tại).
+- **Docs người dùng** (`README.md`/`QUICK_START.md`/`TROUBLESHOOTING.md`/`PROJECT_STRUCTURE.md`/
+  `LICENSE`): đổi tên sản phẩm khỏi "Telegram VS Code Mini App" → "Telecode", xoá hướng dẫn/troubleshoot
+  qua Telegram, thay bằng hướng dẫn dùng app di động (bấm ⚙️, dán URL Tailscale Funnel) — theo yêu cầu
+  user CHỈ sửa đúng đoạn liên quan, không viết lại toàn bộ.
+- **Không đụng** (ngoài phạm vi): `tray.py` (không dùng nữa nhưng KHÔNG phải phần Telegram),
+  `assets/pat-guide.html` (không có tham chiếu Telegram), comment lịch sử trong `lib.rs`/CLAUDE.md
+  giải thích lý do KHÔNG dùng Telegram Mini App WebView (vẫn đúng, là bối cảnh kiến trúc).
+- **Chưa làm**: chưa rebuild `.apk` Android (không đụng gì liên quan mobile trong lần này) — chỉ
+  rebuild + cài lại `.deb` desktop.
 
 ## Đọc thêm
 
