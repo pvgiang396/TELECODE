@@ -6,10 +6,11 @@ const REPO = process.env.GITHUB_REPOSITORY || "pvgiang396/TELECODE";
 const WORKFLOW = "build.yml";
 
 function gh(args, options = {}) {
-  return execFileSync("gh", args, {
+  const output = execFileSync("gh", args, {
     encoding: "utf8",
     stdio: options.inherit ? "inherit" : ["ignore", "pipe", "pipe"],
-  }).trim();
+  });
+  return typeof output === "string" ? output.trim() : "";
 }
 
 export function dispatchGithubBuild({ projectRoot, targets }) {
