@@ -5,7 +5,7 @@ Chi tiết cấu trúc và mục đích của từng file/folder.
 ## File Organization
 
 ```
-telegram-vscode-mini-app/
+telecode/
 │
 ├── 📄 Documentation Files
 │   ├── README.md                 # Main documentation (read this first!)
@@ -15,21 +15,19 @@ telegram-vscode-mini-app/
 │   ├── PROJECT_STRUCTURE.md     # This file
 │   └── LICENSE                   # MIT License
 │
-├── 🤖 Bot Application
-│   ├── bot.py                   # Main Telegram bot logic
+├── ⚙️ Setup Application
+│   ├── wizard.py                 # Local web server (stdlib) serving the setup UI
 │   ├── requirements.txt          # Python dependencies
 │   ├── config.example.yaml      # Configuration template
 │   ├── .env.example             # Environment variables template
 │   └── .gitignore               # Git ignore rules
 │
 ├── 🌐 Web Interface
-│   ├── mini_app.html            # Telegram Mini App UI ⭐
-│   └── nginx.conf               # Web server config (Docker)
+│   └── assets/wizard.html       # Setup wizard UI ⭐ (inline CSS/JS)
 │
-├── 🐳 Docker Setup
-│   ├── docker-compose.yml       # Multi-container orchestration
-│   ├── Dockerfile.bot           # Bot container config
-│   └── setup.sh                 # Automated setup script
+├── 🖥️ Native Apps (Tauri)
+│   ├── src-tauri/               # Desktop (tray + code-server window) + Android app
+│   └── setup.sh                 # Automated setup script (installs code-server, Tailscale, etc.)
 │
 └── 📁 Runtime Folders (created after setup)
     ├── venv/                    # Python virtual environment
@@ -50,27 +48,24 @@ telegram-vscode-mini-app/
 | **TROUBLESHOOTING.md** | Debug & fix issues | Something isn't working |
 | **PROJECT_STRUCTURE.md** | This file | Understanding file organization |
 
-### 🤖 Core Application
+### ⚙️ Core Application
 
-**bot.py** (200 lines)
-- Telegram bot entry point
-- Handles /start, /help, /status commands
-- Creates inline keyboard with Web App button
-- Configuration loading from YAML
-- Error handling and logging
+**wizard.py**
+- Local HTTP server (stdlib only) serving the setup UI
+- Reads/writes `config.yaml`
+- Reports status (`scripts/lib_status.py`) to `assets/wizard.html`
+- When run inside the Tauri app (`TELECODE_MANAGED=1`), also triggers `setup.sh` in the background
 
 **requirements.txt** (15 lines)
-- python-telegram-bot==20.0 - Bot framework
 - PyYAML - Config parsing
 - python-dotenv - Environment variables
-- aiohttp - Async HTTP client (optional)
 
 **config.example.yaml** (20 lines)
-- TELEGRAM_BOT_TOKEN - From @BotFather
 - VSCODE_PUBLIC_URL - Your tunnel URL
 - VSCODE_PORT - Default: 8443
-- MINI_APP_URL - Where mini_app.html is hosted
-- Logging and other settings
+- VSCODE_PASSWORD, VSCODE_AUTH_REQUIRED, VSCODE_ALLOW_INSECURE
+- OPENAI_API_KEY, GITHUB_COPILOT_PAT - AI CLI configuration
+- LOG_LEVEL, ENABLE_DEBUG_MODE, ALLOW_MULTIPLE_CONNECTIONS
 
 **.env.example** (6 lines)
 - Alternative config method
@@ -85,60 +80,41 @@ telegram-vscode-mini-app/
 
 ### 🌐 Web Interface
 
-**mini_app.html** (400 lines) ⭐
-- Responsive Telegram Mini App interface
-- Loads VS Code Server in iframe
-- Status indicators and error handling
-- Retry logic for failed connections
-- Telegram WebApp SDK integration
-- Dark theme support
-- Debug mode for troubleshooting
+**assets/wizard.html** ⭐
+- Setup UI served by `wizard.py`
+- Radio/input form for initial configuration
+- Status polling + iframe to code-server once running
 
-**nginx.conf** (25 lines)
-- Web server configuration
-- CORS headers setup
-- Security headers
-- Static file serving
-- Used in Docker setup
+### 🖥️ Native Apps
 
-### 🐳 Docker & Deployment
+**src-tauri/**
+- Desktop app (Linux/Windows): tray icon, spawns `wizard.py`/code-server as sidecars, opens a native window pointing at the local wizard/VS Code UI
+- Android app: native app embedding code-server via an iframe pointing at a Tailscale Funnel URL entered manually by the user
+- See `CLAUDE.md` for the full build/runtime architecture
 
-**docker-compose.yml** (80 lines)
-- Multi-container orchestration
-- Services:
-  - Bot (telegram bot)
-  - Code-server (VS Code in browser)
-  - Tunnel (Cloudflare)
-  - Web-server (nginx, optional)
-- Volume management
-- Network setup
-- Environment variables
-
-**Dockerfile.bot** (20 lines)
-- Python 3.11 slim base
-- Dependencies installation
-- Bot application setup
-
-**setup.sh** (90 lines)
+**setup.sh** (idempotent)
 - Automated setup script
-- Creates virtual environment
-- Installs dependencies
-- Generates config files
-- Platform detection
+- Installs code-server + Tailscale
+- Patches code-server login page (eye-toggle, dark theme, F12/right-click block)
+- Creates password, runs code-server in background
+- Creates Desktop shortcut
+- Opens Tailscale Funnel
+- Generates `config.yaml` from `config.example.yaml`
+- Installs Python dependencies (dedicated venv)
 
 ### ⚙️ Configuration Files
 
 **config.yaml** (created after setup)
 ```yaml
-TELEGRAM_BOT_TOKEN: "..."      # Your secret bot token
 VSCODE_PUBLIC_URL: "..."       # Tunnel URL
-MINI_APP_URL: "..."            # Where mini app is hosted
+VSCODE_PORT: 8443
+OPENAI_API_KEY: "..."
+GITHUB_COPILOT_PAT: "..."
 # ... other settings
 ```
 
 **.env** (created after setup)
 ```
-TELEGRAM_BOT_TOKEN=...
 VSCODE_PUBLIC_URL=...
 # ... environment variables
 ```
@@ -147,49 +123,40 @@ VSCODE_PUBLIC_URL=...
 
 ### Setup Phase
 ```
-1. User downloads ZIP
+1. User runs the install script or clones the repo
 2. Runs setup.sh
    ├─ Creates venv/
    ├─ Installs dependencies
    ├─ Copies config template
    └─ Ready to configure
-3. User edits config.yaml
+3. User edits config.yaml (or fills in the wizard UI)
 4. User starts services
 ```
 
 ### Runtime Phase
 ```
-1. User starts bot: python bot.py
-2. User starts code-server
-3. User starts tunnel: cloudflared tunnel ...
-4. User opens mini_app.html on web server
-5. User sends /start on Telegram
-6. User clicks "Open VS Code" button
-7. Mini App loads and connects to VS Code
+1. User starts code-server
+2. User starts the tunnel (Tailscale Funnel)
+3. User opens the native Telecode app (desktop or Android)
+4. App loads the code-server URL (local for desktop, pasted Funnel URL for Android)
 ```
 
 ## File Dependencies
 
 ```
-mini_app.html
+assets/wizard.html
     ↓ (loads from)
-config.yaml → MINI_APP_URL
-    ↓ (requires)
-Web server serving mini_app.html
+wizard.py (HTTP server)
+    ↓ (reads/writes)
+config.yaml
 
-bot.py
-    ↓ (reads)
-config.yaml (TELEGRAM_BOT_TOKEN, MINI_APP_URL, VSCODE_PUBLIC_URL)
-    ↓ (requires)
-python-telegram-bot library
+src-tauri/ (desktop)
+    ↓ (spawns as sidecar)
+wizard.py, code-server
 
-docker-compose.yml
-    ↓ (runs)
-- bot.py (in docker container)
-- code-server (official image)
-- cloudflared (official image)
-    ↓ (uses)
-config.yaml, requirements.txt, Dockerfile.bot
+src-tauri/ (Android)
+    ↓ (iframe to)
+Tailscale Funnel URL (entered by user)
 ```
 
 ## Configuration Hierarchy
@@ -210,15 +177,15 @@ Note: .env > config.yaml > defaults
 ## Security Considerations
 
 ### Sensitive Files (Never Commit)
-- ❌ config.yaml (contains bot token)
+- ❌ config.yaml (contains password/API keys)
 - ❌ .env (contains secrets)
 - ❌ ~/.config/code-server/config.yaml (has password)
 
 ### Safe to Commit
 - ✅ config.example.yaml (template only)
 - ✅ .env.example (template only)
-- ✅ bot.py (no secrets)
-- ✅ mini_app.html (no secrets)
+- ✅ wizard.py (no secrets)
+- ✅ assets/wizard.html (no secrets)
 - ✅ All documentation
 
 ### .gitignore Protections
@@ -236,60 +203,50 @@ __pycache__/
 
 ```
 1. Initial Setup
-   ├─ Download ZIP
+   ├─ Clone repo / run install script
    ├─ bash setup.sh
    ├─ Edit config.yaml
    └─ Edit .env
 
 2. Local Development
-   ├─ python bot.py (terminal 1)
-   ├─ code-server (terminal 2)
-   ├─ cloudflared tunnel (terminal 3)
-   ├─ python -m http.server (terminal 4)
-   └─ Test on Telegram
+   ├─ code-server (terminal 1)
+   ├─ tailscale funnel (terminal 2)
+   └─ Test via the native Telecode app
 
-3. Docker Deployment
-   ├─ docker-compose up -d
-   ├─ Get tunnel URL
-   ├─ Update config
-   └─ Access via Telegram
+3. Native App Build
+   ├─ npm run build (Tauri desktop, cross-platform)
+   ├─ npx tauri android build (Android APK)
+   └─ Distribute/install
 
 4. Maintenance
-   ├─ Check logs: docker-compose logs -f
+   ├─ Check logs: journalctl -u code-server -f
    ├─ Update code
-   ├─ docker-compose down && up
    └─ Monitor status
 ```
 
 ## File Size Reference
 
 ```
-bot.py                ~7 KB
-mini_app.html        ~15 KB
+wizard.py             ~7 KB
 README.md            ~12 KB
 CLAUDE.md            ~25 KB
 TROUBLESHOOTING.md   ~15 KB
 config.example.yaml  ~2 KB
 requirements.txt     ~1 KB
-docker-compose.yml   ~4 KB
-TOTAL (uncompressed) ~85 KB
-TOTAL (compressed)   ~27 KB (ZIP)
 ```
 
 ## Extension Points
 
 Files you can customize:
 
-1. **mini_app.html**
+1. **assets/wizard.html**
    - Change colors/theme
    - Add buttons
    - Modify layout
-   - Add keyboard shortcuts
 
-2. **bot.py**
-   - Add new commands
-   - Change welcome message
-   - Add handlers
+2. **wizard.py**
+   - Add new status checks
+   - Change setup flow
    - Integrate with other APIs
 
 3. **config.yaml**
@@ -297,22 +254,21 @@ Files you can customize:
    - Modify ports
    - Update credentials
 
-4. **docker-compose.yml**
-   - Add services
-   - Change image versions
-   - Modify volumes
-   - Update networking
+4. **src-tauri/**
+   - Customize tray menu
+   - Change window behavior
+   - Modify Android app UI
 
 ## Next Steps
 
 1. **Understand the code**
    - Read CLAUDE.md (for AI help)
-   - Understand bot.py logic
-   - Review mini_app.html structure
+   - Understand wizard.py logic
+   - Review src-tauri/ structure
 
 2. **Setup locally**
    - Follow QUICK_START.md
-   - Get bot running
+   - Get code-server running
    - Test end-to-end
 
 3. **Customize**
@@ -321,8 +277,8 @@ Files you can customize:
    - Add features
 
 4. **Deploy**
-   - Use Docker
-   - Setup monitoring
+   - Build native apps (Tauri)
+   - Setup Tailscale Funnel
    - Enable security
 
 ---

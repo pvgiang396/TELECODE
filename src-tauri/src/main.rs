@@ -1,17 +1,20 @@
-// telecode — Tauri shell. Kế thừa nguyên vẹn bot.py/wizard.py/setup.sh từ telecode (xem
-// sidecar/dispatcher.py + CLAUDE.md) — module này chỉ lo: cửa sổ, tray, spawn/kill 2 sidecar
-// (wizard-server phục vụ UI cài đặt, bot chạy nền Telegram polling), copy resource bundle
-// (read-only) ra 1 bản ghi được trong app-data lúc chạy lần đầu (setup.sh cần ghi config.yaml/.env/
-// venv cạnh chính nó — không ghi được vào /usr/lib/telecode/... trên .deb đã cài).
+// telecode — Tauri shell. Kế thừa nguyên vẹn wizard.py/setup.sh từ telecode (xem
+// sidecar/dispatcher.py + CLAUDE.md) — module này chỉ lo: cửa sổ, tray, spawn/kill sidecar
+// wizard-server (phục vụ UI cài đặt/VS Code), copy resource bundle (read-only) ra 1 bản ghi
+// được trong app-data lúc chạy lần đầu (setup.sh cần ghi config.yaml/.env/venv cạnh chính nó
+// — không ghi được vào /usr/lib/telecode/... trên .deb đã cài).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod sidecar;
 #[cfg(target_os = "windows")]
 mod wsl_bridge;
 
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 fn wants_tray_only() -> bool {
@@ -52,12 +55,22 @@ fn main() {
             let app_handle = app.handle().clone();
             let tray_only = wants_tray_only();
 
+            let source_dir = resolve_writable_source_dir(app)?;
+            let run_dir = app.path().app_data_dir()?.join("run");
+
             let open_item = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             let exit_item = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&open_item, &exit_item])?;
 
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            // Icon tray xanh (chấm xanh = đang hoạt động) làm mặc định lúc mới mở — trước đây dùng
+            // `default_window_icon()` (icon app trơn, không chấm màu nào) khiến tray trông như app
+            // "không rõ trạng thái" dù đang chạy bình thường. Poll định kỳ bên dưới sẽ tự đổi sang
+            // tray-icon-off.png (chấm đỏ) nếu `overall_ok()` (scripts/lib_status.py) báo có thành
+            // phần nào đó không sống/không truy cập được từ internet.
+            let tray_icon_on = tray_icon_image(&source_dir, "tray-icon-on.png")
+                .or_else(|| app.default_window_icon().cloned());
+
+            let mut tray_builder = TrayIconBuilder::new()
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => show_main_window(app),
@@ -73,11 +86,18 @@ fn main() {
                     {
                         show_main_window(tray.app_handle());
                     }
-                })
-                .build(app)?;
+                });
+            if let Some(icon) = tray_icon_on {
+                tray_builder = tray_builder.icon(icon);
+            }
+            let tray = tray_builder.build(app)?;
+            app.manage(tray);
 
-            let source_dir = resolve_writable_source_dir(app)?;
-            let run_dir = app.path().app_data_dir()?.join("run");
+            {
+                let source_dir = source_dir.clone();
+                let app_handle = app_handle.clone();
+                std::thread::spawn(move || poll_tray_status(&app_handle, &source_dir));
+            }
 
             tauri::async_runtime::spawn(async move {
                 match sidecar::spawn_all(&app_handle, &source_dir, &run_dir).await {
@@ -127,7 +147,56 @@ fn main() {
         .expect("Lỗi khi chạy telecode");
 }
 
-/// setup.sh/bot.py/wizard.py cần ghi config.yaml/.env/state.json/venv NGAY CẠNH CHÍNH CHÚNG —
+fn tray_icon_image(source_dir: &Path, file_name: &str) -> Option<Image<'static>> {
+    let path = source_dir.join("assets").join(file_name);
+    Image::from_path(&path).ok()
+}
+
+/// Poll `/api/tray-status` (wizard-server, xem wizard.py) mỗi 10s để đổi icon tray xanh/đỏ theo
+/// `overall_ok()` (scripts/lib_status.py — đã có sẵn logic tổng hợp "mọi thành phần sống + Funnel
+/// thật sự reachable từ internet", trước đây chưa từng được main.rs dùng tới). Chạy trên 1 thread
+/// riêng (không phải async task) vì chỉ cần TCP request chặn đơn giản, cùng mức "chấp nhận block 1
+/// thread ngắn" như `wait_until_port_open()` trong sidecar.rs — không đáng thêm dependency HTTP
+/// client/JSON riêng chỉ cho 1 field boolean.
+fn poll_tray_status(app: &AppHandle, source_dir: &Path) {
+    let icon_on = tray_icon_image(source_dir, "tray-icon-on.png");
+    let icon_off = tray_icon_image(source_dir, "tray-icon-off.png");
+    let mut last_ok: Option<bool> = None;
+
+    loop {
+        std::thread::sleep(Duration::from_secs(10));
+        let ok = fetch_overall_ok();
+        if Some(ok) == last_ok {
+            continue;
+        }
+        last_ok = Some(ok);
+        let icon = if ok { &icon_on } else { &icon_off };
+        if let (Some(icon), Some(tray)) = (icon, app.try_state::<TrayIcon>()) {
+            let _ = tray.set_icon(Some(icon.clone()));
+        }
+    }
+}
+
+/// GET thô qua TCP tới `/api/tray-status` — tránh thêm dependency `reqwest`/`serde_json` chỉ để đọc
+/// 1 field boolean; parse bằng cách tìm chuỗi con `"overallOk": true` (khớp đúng định dạng
+/// `json.dumps()` mặc định của Python — separator `": "`, xem wizard.py).
+fn fetch_overall_ok() -> bool {
+    let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", 8899)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let request = b"GET /api/tray-status HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    if stream.write_all(request).is_err() {
+        return false;
+    }
+    let mut body = String::new();
+    if stream.read_to_string(&mut body).is_err() {
+        return false;
+    }
+    body.contains("\"overallOk\": true")
+}
+
+/// setup.sh/wizard.py cần ghi config.yaml/.env/venv NGAY CẠNH CHÍNH CHÚNG —
 /// resource bundle (`bundle.resources` trong tauri.conf.json) nằm ở vị trí chỉ-đọc trên bản đã cài
 /// (vd `/usr/lib/telecode/src/` trên .deb, root-owned) nên không thể chạy trực tiếp tại đó. Lần
 /// chạy đầu tiên, copy toàn bộ resource "src/" sang `app_data_dir()/source` (ghi được, thuộc user
@@ -158,7 +227,7 @@ fn resolve_writable_source_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std:
 }
 
 /// Chạy khi `.bundle-version` khác version bundle đang chạy (vừa `dpkg -i` bản `.deb` mới, kể cả
-/// qua tính năng "Cập nhật ứng dụng") — đồng bộ lại các file "code" (bot.py/wizard.py/setup.sh/
+/// qua tính năng "Cập nhật ứng dụng") — đồng bộ lại các file "code" (wizard.py/setup.sh/
 /// scripts//assets/...) từ resource bundle mới NHẤT vào bản copy ghi-được. `copy_dir_recursive`
 /// chỉ duyệt theo `bundled_src` nên chỉ ghi đè đúng các entry có trong đó — `config.yaml`/`.env`/
 /// `venv/`/`logs/`/`.run/` (sinh ra bởi setup.sh, KHÔNG nằm trong bundled_src) không bị đụng tới,
@@ -177,7 +246,7 @@ fn refresh_cached_source(
 }
 
 /// Bản cài `telecode` kiểu cũ (chạy trực tiếp qua systemd, không qua Tauri) quy ước clone vào
-/// `~/telecode` — `config.yaml`/`.env` thật (token bot Telegram, OPENAI_API_KEY, GITHUB_COPILOT_PAT)
+/// `~/telecode` — `config.yaml`/`.env` thật (OPENAI_API_KEY, GITHUB_COPILOT_PAT)
 /// nằm ở đó, KHÁC với bản copy resource vừa tạo ở trên (rỗng, chỉ có giá trị placeholder từ
 /// `config.example.yaml`). Không migrate sẽ khiến wizard báo "chưa cấu hình" dù máy đã cấu hình từ
 /// trước (bug thật đã gặp khi chuyển sang gói Tauri) — Tailscale/code-server không bị ảnh hưởng vì

@@ -1,14 +1,11 @@
 // Sidecar Python cho telecode — khác hẳn mô hình k8sql (1 server sidecar duy nhất phục vụ toàn
-// bộ UI): ở đây có 2 tiến trình con độc lập, cả 2 đều chạy file .py THẬT trên đĩa qua
-// `dispatcher.py`'s runpy (xem docstring sidecar/dispatcher.py để hiểu lý do KHÔNG freeze bot.py/
-// wizard.py vào binary PyInstaller):
-//   - "wizard-server": HTTP server cố định cổng 8899 (PORT trong wizard.py, không đổi được) — cửa
-//     sổ chính trỏ WebviewUrl::External vào đây, y hệt cách wizard.py từng mở qua Chrome --app=.
-//   - "bot": tiến trình long-polling Telegram, KHÔNG có HTTP endpoint để health-check — chỉ spawn
-//     và log, coi là "chạy được" ngay khi spawn thành công (khác wizard-server phải đợi bind cổng).
+// bộ UI): chạy thẳng file .py THẬT trên đĩa qua `dispatcher.py`'s runpy (xem docstring
+// sidecar/dispatcher.py để hiểu lý do KHÔNG freeze wizard.py vào binary PyInstaller) — HTTP server
+// "wizard-server" cố định cổng 8899 (PORT trong wizard.py, không đổi được), cửa sổ chính trỏ
+// WebviewUrl::External vào đây, y hệt cách wizard.py từng mở qua Chrome --app=.
 //
 // Trên Windows, KHÔNG có binary PyInstaller nào cho Windows (PyInstaller không cross-compile được —
-// xem CLAUDE.md) — cả 2 tiến trình trên được gọi qua wsl_bridge.rs (spawn `wsl.exe` thay vì
+// xem CLAUDE.md) — tiến trình trên được gọi qua wsl_bridge.rs (spawn `wsl.exe` thay vì
 // `.sidecar()`), tái dùng đúng binary Linux đã build sẵn, chạy BÊN TRONG WSL2 — đúng kiến trúc
 // install.ps1 gốc vốn đã yêu cầu (code-server chưa từng chạy native trên Windows).
 use std::path::Path;
@@ -23,7 +20,6 @@ use crate::wsl_bridge;
 
 pub struct SidecarChildren {
     pub wizard: CommandChild,
-    pub bot: CommandChild,
 }
 
 macro_rules! log_child_events {
@@ -51,9 +47,9 @@ macro_rules! log_child_events {
 
 const WIZARD_PORT: u16 = 8899; // = PORT trong wizard.py, không tham số hoá được — xem sidecar/dispatcher.py
 
-/// Spawn cả 2 sidecar (wizard-server + bot) chạy nhắm vào đúng bộ source thật tại `source_dir`
-/// (bản copy ghi được trong app-data — xem `main.rs::resolve_writable_source_dir()`; KHÔNG chạy
-/// thẳng trên resource bundle read-only) và ghi runtime state vào `run_dir`.
+/// Spawn sidecar wizard-server chạy nhắm vào đúng bộ source thật tại `source_dir` (bản copy ghi
+/// được trong app-data — xem `main.rs::resolve_writable_source_dir()`; KHÔNG chạy thẳng trên
+/// resource bundle read-only) và ghi runtime state vào `run_dir`.
 pub async fn spawn_all(
     app: &AppHandle,
     source_dir: &Path,
@@ -62,7 +58,6 @@ pub async fn spawn_all(
     std::fs::create_dir_all(run_dir).map_err(|e| format!("Không tạo được RUN_DIR: {e}"))?;
 
     let wizard_py = source_dir.join("wizard.py");
-    let bot_py = source_dir.join("bot.py");
 
     let wizard_args = vec![
         "wizard-server".to_string(),
@@ -70,18 +65,16 @@ pub async fn spawn_all(
         run_dir.to_string_lossy().to_string(),
         source_dir.to_string_lossy().to_string(),
     ];
-    let bot_args = vec!["bot".to_string(), bot_py.to_string_lossy().to_string()];
+
+    // wizard.py performs a non-destructive Codex writer-lock cleanup before serving.
+    // It uses flock, so locks held by the currently running app-server remain intact.
 
     let (wizard_rx, wizard_child) = spawn_sidecar(app, wizard_args)?;
     log_child_events!("wizard", wizard_rx);
     wait_until_port_open(WIZARD_PORT).await?;
 
-    let (bot_rx, bot_child) = spawn_sidecar(app, bot_args)?;
-    log_child_events!("bot", bot_rx);
-
     Ok(SidecarChildren {
         wizard: wizard_child,
-        bot: bot_child,
     })
 }
 
@@ -148,5 +141,4 @@ async fn wait_until_port_open(port: u16) -> Result<(), String> {
 
 pub fn shutdown(children: SidecarChildren) {
     let _ = children.wizard.kill();
-    let _ = children.bot.kill();
 }

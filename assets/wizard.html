@@ -95,7 +95,8 @@
   <header>
     <div class="header-actions">
       <button type="button" id="btnSettings" class="icon-btn" title="Cấu hình cài đặt">⚙️</button>
-      <button type="button" id="btnUpdate" class="icon-btn" title="Cập nhật ứng dụng">🔄</button>
+      <button type="button" id="btnUpdate" class="icon-btn" title="Cập nhật ứng dụng">⬇️</button>
+      <button type="button" id="btnCopyUrl" class="icon-btn" title="Sao chép URL Tailscale">📋</button>
     </div>
   </header>
 
@@ -168,26 +169,32 @@ document.getElementById('btnUpdate').addEventListener('click', () => {
       } else {
         alert('❌ Lỗi cập nhật: ' + (res.error || 'không rõ nguyên nhân'));
         btn.disabled = false;
-        btn.textContent = '🔄';
+        btn.textContent = '⬇️';
       }
     })
     .catch(() => {
       alert('❌ Lỗi kết nối khi gọi cập nhật.');
       btn.disabled = false;
-      btn.textContent = '🔄';
+      btn.textContent = '⬇️';
     });
 });
 
-function radioGroup(name, label, current) {
-  return `<div class="step">
-    <h2>${label}</h2>
-    <div class="radio-row">
-      <label><input type="radio" name="${name}" value="keep" checked> Giữ nguyên</label>
-      <label><input type="radio" name="${name}" value="redo"> Cài lại / khởi động lại</label>
-    </div>
-    <div class="hint">Hiện tại: ${current}</div>
-  </div>`;
-}
+// URL Tailscale/Funnel của máy này — nạp từ /api/status (fetch chính bên dưới), dùng để đem
+// sang app di động (frontend-placeholder/index.html) mà không phải gõ tay trên điện thoại.
+let currentTailscaleUrl = '';
+document.getElementById('btnCopyUrl').addEventListener('click', () => {
+  if (!currentTailscaleUrl) {
+    alert('Chưa có URL Tailscale Funnel — cần cấu hình Funnel trước (xem mục "Đã cài đặt sẵn").');
+    return;
+  }
+  const btn = document.getElementById('btnCopyUrl');
+  navigator.clipboard.writeText(currentTailscaleUrl).then(() => {
+    btn.textContent = '✅';
+    setTimeout(() => { btn.textContent = '📋'; }, 1500);
+  }).catch(() => {
+    alert('❌ Không sao chép được vào clipboard.\n' + currentTailscaleUrl);
+  });
+});
 
 // Nội dung 1 mục ĐÃ CÀI/ĐANG CHẠY sẵn (mặc định chọn "Giữ nguyên") — chỉ phần
 // bên trong, không tự bọc collapse riêng (4 mục này gộp chung 1 collapse duy nhất).
@@ -203,6 +210,9 @@ function subRadioGroup(name, label, current) {
 
 fetch('/api/status').then(r => r.json()).then(s => {
   renderMainContent(s);
+  currentTailscaleUrl = s.tailscaleUrl || '';
+  const copyBtn = document.getElementById('btnCopyUrl');
+  copyBtn.title = currentTailscaleUrl ? `Sao chép: ${currentTailscaleUrl}` : 'Sao chép URL Tailscale (chưa cấu hình Funnel)';
   let html = '';
 
   // 4 mục đã cài/đang chạy sẵn -> gộp chung 1 collapse duy nhất (đóng mặc định).
@@ -240,15 +250,6 @@ fetch('/api/status').then(r => r.json()).then(s => {
   </div>`;
 
   html += `<div class="step">
-    <h2>Token bot Telegram</h2>
-    <div class="pw-wrap">
-      <input type="password" id="token" name="token" value="${s.currentToken || ''}" placeholder="Lấy từ @BotFather (/newbot)" required>
-      <button type="button" id="toggleToken">👁</button>
-    </div>
-    <div class="hint">${s.currentToken ? 'Đã có token đã lưu, để nguyên là giữ token cũ.' : 'Chưa có token, bắt buộc nhập.'}</div>
-  </div>`;
-
-  html += `<div class="step">
     <h2>Codex CLI qua 9Router (Gemini) — tuỳ chọn</h2>
     <div class="pw-wrap">
       <input type="password" id="openaiApiKey" name="openaiApiKey" value="${s.currentOpenaiApiKey || ''}" placeholder="OPENAI_API_KEY (để trống nếu chưa dùng)">
@@ -266,30 +267,21 @@ fetch('/api/status').then(r => r.json()).then(s => {
     <div class="hint">${s.currentGithubCopilotPat ? 'Đã có PAT đã lưu, để nguyên là giữ PAT cũ.' : 'Tạo tại <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>, bật quyền "Copilot Requests", <a href="/pat-guide.html" onclick="window.open(\'/pat-guide.html\',\'patGuide\',\'noopener,noreferrer,width=900,height=750,menubar=no,toolbar=no,location=no,status=no\'); return false;">Click vào đây</a> để xem hướng dẫn cách tạo token. Để trống = bỏ qua.'}</div>
   </div>`;
 
-  html += `<div class="step">
-    <h2>Thư mục nhận ảnh/file gửi qua Telegram</h2>
-    <input type="text" id="fileInboxDir" name="fileInboxDir" value="${s.currentFileInboxDir || ''}" placeholder="Đường dẫn thư mục" required>
-    <div class="hint">Ảnh hoặc file bất kỳ gửi thẳng cho bot (chat riêng) sẽ tự lưu vào đây trên máy này. Mặc định là thư mục con "files" trong thư mục cài telecode.</div>
-  </div>`;
-
-  if (s.botRunning) {
-    html += radioGroup('botAction', 'Bot Telegram', `đang chạy (PID ${s.botPid})`);
-  }
-
   html += `<button type="submit" id="submitBtn">Lưu cấu hình</button>`;
 
   form.innerHTML = html;
   loading.style.display = 'none';
   form.style.display = 'block';
-  openSettings();
+  // Đã cấu hình xong (từng lưu password) rồi thì không tự bật modal cài đặt mỗi lần mở
+  // app nữa — trang chính (login code-server thật, hoặc VS Code nếu đã đăng nhập) đủ để
+  // dùng ngay. Modal vẫn mở tay được qua nút ⚙️.
+  if (!s.currentPassword) {
+    openSettings();
+  }
 
   document.getElementById('togglePw').addEventListener('click', () => {
     const p = document.getElementById('password');
     p.type = p.type === 'password' ? 'text' : 'password';
-  });
-  document.getElementById('toggleToken').addEventListener('click', () => {
-    const t = document.getElementById('token');
-    t.type = t.type === 'password' ? 'text' : 'password';
   });
   document.getElementById('toggleOpenaiApiKey').addEventListener('click', () => {
     const k = document.getElementById('openaiApiKey');

@@ -1,5 +1,5 @@
 """
-Logic kiểm tra trạng thái telecode (code-server/bot/tailscale/funnel) dùng chung
+Logic kiểm tra trạng thái telecode (code-server/tailscale/funnel) dùng chung
 giữa wizard.py (probe_status cho UI cài đặt) và tray.py (poll cho system tray).
 Tách ra từ wizard.py's probe_status() cũ — giữ nguyên các field/hành vi cũ, chỉ
 thêm check_funnel_public_reachable() mới (curl thẳng URL public, tiêu chí HTTP
@@ -96,6 +96,27 @@ def resolve_public_ip(hostname: str, timeout: int = 5) -> str:
                 return line
     return ""
 
+def resolve_public_ips(hostname: str, timeout: int = 5) -> list[str]:
+    """Lấy toàn bộ IPv4 public để tránh chọn nhầm một relay Funnel lỗi."""
+    if not shutil.which("dig"):
+        return []
+    addresses: list[str] = []
+    for resolver in _PUBLIC_DNS_RESOLVERS:
+        try:
+            out = subprocess.run(
+                ["dig", f"@{resolver}", hostname, "+short", "+time=3", "+tries=1"],
+                capture_output=True, text=True, timeout=timeout,
+            ).stdout.strip()
+        except Exception:
+            continue
+        for line in out.splitlines():
+            line = line.strip()
+            if line and line[0].isdigit() and line not in addresses:
+                addresses.append(line)
+        if addresses:
+            break
+    return addresses
+
 
 def check_funnel_public_reachable(url: str, timeout: int = 5) -> tuple[bool, int]:
     """Coi 'OK' khi HTTP code không phải 000/502/503/504 — đúng tiêu chí verify
@@ -108,18 +129,36 @@ def check_funnel_public_reachable(url: str, timeout: int = 5) -> tuple[bool, int
     hostname = urlparse(url).hostname
     if not hostname:
         return False, 0
-    ip = resolve_public_ip(hostname, timeout=timeout)
-    if not ip:
-        return False, 0
-    try:
-        code_str = subprocess.run(
-            ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
-             "--max-time", str(timeout), "--resolve", f"{hostname}:443:{ip}", url],
-            capture_output=True, text=True, timeout=timeout + 2,
-        ).stdout.strip()
-        code = int(code_str) if code_str.isdigit() else 0
-    except Exception:
-        code = 0
+    ips = resolve_public_ips(hostname, timeout=timeout)
+    if not ips:
+        ips = [None]
+    code = 0
+    for ip in ips:
+        curl_args = ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+                     "--max-time", str(timeout)]
+        if ip:
+            curl_args.extend(["--resolve", f"{hostname}:443:{ip}"])
+        curl_args.append(url)
+        try:
+            code_str = subprocess.run(curl_args, capture_output=True, text=True,
+                                      timeout=timeout + 2).stdout.strip()
+            code = int(code_str) if code_str.isdigit() else 0
+        except Exception:
+            code = 0
+        if code not in (0, 502, 503, 504):
+            break
+    # Some networks/proxies terminate TLS before curl can honor --resolve.
+    # Retry normally so a healthy Funnel is not reported as HTTP 0.
+    if code in (0, 502, 503, 504) and ips:
+        try:
+            code_str = subprocess.run(
+                ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+                 "--max-time", str(timeout), url],
+                capture_output=True, text=True, timeout=timeout + 2,
+            ).stdout.strip()
+            code = int(code_str) if code_str.isdigit() else code
+        except Exception:
+            pass
     ok = code not in (0, 502, 503, 504)
     return ok, code
 
@@ -129,7 +168,7 @@ def get_status(run_dir: Path, check_public: bool = True, project_dir: Path | Non
     wizard.py's probe_status() cũ (giữ nguyên tên field), thêm 2 field mới
     funnelPubliclyReachable/funnelPublicHttpCode.
 
-    project_dir — thư mục chứa config.yaml thật (nơi setup.sh/bot.py chạy). Mặc định
+    project_dir — thư mục chứa config.yaml thật (nơi setup.sh chạy). Mặc định
     `run_dir.parent` ĐÚNG cho CLI gốc (RUN_DIR = "$DIR/.run", DIR chính là project_dir) nhưng SAI ở
     bản Tauri — run_dir ở đó là `app_data_dir()/run`, KHÔNG nằm cạnh `app_data_dir()/source/
     config.yaml` — bug thật đã gặp: currentToken/currentOpenaiApiKey/currentGithubCopilotPat luôn
@@ -163,7 +202,6 @@ def get_status(run_dir: Path, check_public: bool = True, project_dir: Path | Non
             ts_version = ""
 
     cs_running, cs_pid = _service_running(run_dir, "code-server.pid", "code-server")
-    bot_running, bot_pid = _service_running(run_dir, "bot.pid", "telecode-bot")
 
     funnel_configured = False
     tailscale_url = ""
@@ -197,9 +235,6 @@ def get_status(run_dir: Path, check_public: bool = True, project_dir: Path | Non
         funnel_public_reachable, funnel_public_http_code = check_funnel_public_reachable(tailscale_url)
 
     current_password = read_value(cs_config, "password:")
-    current_token = read_value(project_config, "TELEGRAM_BOT_TOKEN:")
-    if current_token == "YOUR_BOT_TOKEN_HERE":
-        current_token = ""
 
     current_openai_key = read_value(project_config, "OPENAI_API_KEY:")
     if current_openai_key == "YOUR_OPENAI_API_KEY_HERE":
@@ -208,10 +243,6 @@ def get_status(run_dir: Path, check_public: bool = True, project_dir: Path | Non
     current_github_copilot_pat = read_value(project_config, "GITHUB_COPILOT_PAT:")
     if current_github_copilot_pat == "YOUR_GITHUB_COPILOT_PAT_HERE":
         current_github_copilot_pat = ""
-
-    current_file_inbox_dir = read_value(project_config, "FILE_INBOX_DIR:")
-    if not current_file_inbox_dir or current_file_inbox_dir == "/path/to/telecode/files":
-        current_file_inbox_dir = str(project_root / "files")
 
     vscode_port = read_value(project_config, "VSCODE_PORT:") or "8443"
 
@@ -229,22 +260,16 @@ def get_status(run_dir: Path, check_public: bool = True, project_dir: Path | Non
         "tailscaleUrl": tailscale_url,
         "funnelPubliclyReachable": funnel_public_reachable,
         "funnelPublicHttpCode": funnel_public_http_code,
-        "botRunning": bot_running,
-        "botPid": bot_pid,
         "currentPassword": current_password,
-        "currentToken": current_token,
         "currentOpenaiApiKey": current_openai_key,
         "currentGithubCopilotPat": current_github_copilot_pat,
-        "currentFileInboxDir": current_file_inbox_dir,
     }
 
 
 def overall_ok(status: dict) -> bool:
-    """1 boolean tổng dùng cho tray icon xanh/đỏ — mọi thành phần phải sống VÀ
-    funnel phải thật sự truy cập được từ internet (không chỉ cấu hình đúng)."""
+    """Màu xanh chỉ khi dịch vụ lõi và endpoint public đều sẵn sàng."""
     return (
         status.get("codeServerRunning", False)
-        and status.get("botRunning", False)
         and status.get("tailscaleBackendState") == "Running"
         and status.get("funnelConfigured", False)
         and status.get("funnelPubliclyReachable", False)

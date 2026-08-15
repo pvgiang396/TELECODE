@@ -7,7 +7,7 @@
 // trúc `install.ps1` gốc vốn đã yêu cầu WSL2 (code-server không chạy native Windows).
 //
 // Giả định CHƯA kiểm chứng: binary `telecode-sidecar` (Linux) + toàn bộ source tree
-// (bot.py/wizard.py/scripts/assets) đã được đặt sẵn tại `~/.local/share/telecode/source` BÊN
+// (wizard.py/scripts/assets) đã được đặt sẵn tại `~/.local/share/telecode/source` BÊN
 // TRONG distro WSL2 mặc định — bước "provision vào WSL2 lúc cài đặt lần đầu" CHƯA triển khai ở đây,
 // cần làm thêm 1 bước cài đặt riêng (tương tự install.ps1 cũ tự bootstrap WSL2 rồi git clone) trước
 // khi module này có thể chạy đúng trên máy thật.
@@ -24,8 +24,8 @@ const WSL_SIDECAR_BIN: &str = "$HOME/.local/share/telecode/bin/telecode-sidecar"
 /// `spawn_sidecar()` trong sidecar.rs gọi hàm này thay vì `.sidecar()` khi target_os = "windows".
 /// Nhận `args` đã tính theo quy ước Windows Path (sidecar.rs's `source_dir.join(...)`) — nhưng path
 /// đó KHÔNG dùng được bên trong WSL, nên hàm này bỏ qua `args` gốc và tự dựng lại đường dẫn WSL
-/// tương ứng theo subcommand đầu tiên. Cách này chỉ đúng cho 2 subcommand cố định (wizard-server/
-/// bot) mà sidecar.rs hiện gọi — không tổng quát cho subcommand tuỳ ý.
+/// tương ứng theo subcommand đầu tiên. Cách này chỉ đúng cho subcommand cố định (wizard-server) mà
+/// sidecar.rs hiện gọi — không tổng quát cho subcommand tuỳ ý.
 pub fn spawn_via_wsl(
     app: &AppHandle,
     args: Vec<String>,
@@ -38,7 +38,6 @@ pub fn spawn_via_wsl(
             "/tmp/telecode-run".to_string(),
             WSL_SOURCE_DIR.to_string(),
         ],
-        "bot" => vec!["bot".to_string(), format!("{WSL_SOURCE_DIR}/bot.py")],
         other => return Err(format!("wsl_bridge: subcommand không hỗ trợ: {other}")),
     };
 

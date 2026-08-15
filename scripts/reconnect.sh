@@ -9,10 +9,10 @@
 #
 # Gốc vấn đề cần xử lý: Tailscale có thể tự đăng xuất ("Stopped; run 'tailscale
 # up' to log in") sau khi máy sleep/restart mạng/xung đột VPN khác (vd Cloudflare
-# WARP), dù tailscaled daemon + code-server + bot vẫn chạy bình thường — lúc đó
-# mini app trên điện thoại không vào được (funnel không còn public ra internet)
-# dù mở trên máy tính vẫn OK. Script này tự phát hiện + tự đăng nhập lại, không
-# cần user tự gõ lệnh debug.
+# WARP), dù tailscaled daemon + code-server vẫn chạy bình thường — lúc đó app di
+# động không vào được (funnel không còn public ra internet) dù mở trên máy tính
+# vẫn OK. Script này tự phát hiện + tự đăng nhập lại, không cần user tự gõ lệnh
+# debug.
 #
 # Bug thật khác đã gặp (không phải "Stopped"): BackendState vẫn "Running"
 # nhưng control-plane của tailscaled bị treo (`tailscale status --json`'s
@@ -48,10 +48,9 @@ is_alive() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
 
 EXIT_CODE=0
 
-# --- 1) code-server + bot: chỉ START lại, KHÔNG tạo/ghi đè unit hay config ----
+# --- 1) code-server: chỉ START lại, KHÔNG tạo/ghi đè unit hay config ----------
 if [ "$USE_SYSTEMD" = "1" ]; then
     systemctl --user is-active --quiet code-server || systemctl --user start code-server
-    systemctl --user is-active --quiet telecode-bot || systemctl --user start telecode-bot
 else
     # macOS/máy không có systemd --user thật -> fallback nohup, dùng lại đúng
     # cấu hình đã ghi ở lần chạy setup.sh trước (CS_ENV_FILE, workspace mặc định).
@@ -62,10 +61,6 @@ else
         CS_ENV_FILE="$RUN_DIR/code-server.env"
         ( set -a; [ -f "$CS_ENV_FILE" ] && . "$CS_ENV_FILE"; set +a
           nohup code-server --bind-addr 127.0.0.1:8443 "$CODE_SERVER_WORKSPACE" > "$LOG_DIR/code-server.log" 2>&1 & echo $! > "$CS_PID" )
-    fi
-    BOT_PID="$RUN_DIR/bot.pid"
-    if ! is_alive "$BOT_PID" && [ -x "$DIR/venv/bin/python3" ]; then
-        (cd "$DIR" && setsid nohup "$DIR/venv/bin/python3" bot.py > "$LOG_DIR/bot.log" 2>&1 < /dev/null & echo $! > "$BOT_PID")
     fi
 fi
 
@@ -106,7 +101,7 @@ except Exception:
         systemctl is-active --quiet tailscaled 2>/dev/null || TS_CMD="systemctl start tailscaled && sleep 2 && $TS_CMD"
 
         if $RUN_ROOT bash -c "$TS_CMD"; then
-            notify "✅ Đã kết nối lại Tailscale — mini app trên điện thoại dùng được ngay."
+            notify "✅ Đã kết nối lại Tailscale — app di động dùng được ngay."
         else
             notify "⚠️ Không đăng nhập lại được Tailscale — mở terminal chạy tay: sudo tailscale up"
             EXIT_CODE=1
@@ -134,7 +129,7 @@ except Exception:
         if $RUN_ROOT bash -c "$RESTART_CMD"; then
             sleep 5
             if [ "$(ts_self_online)" = "True" ]; then
-                notify "✅ Đã khôi phục kết nối Tailscale (control-plane bị treo, có thể do xung đột WARP) — mini app dùng được ngay."
+                notify "✅ Đã khôi phục kết nối Tailscale (control-plane bị treo, có thể do xung đột WARP) — app di động dùng được ngay."
             else
                 notify "⚠️ Đã restart tailscaled nhưng vẫn chưa online — kiểm tra tay: tailscale status"
                 EXIT_CODE=1

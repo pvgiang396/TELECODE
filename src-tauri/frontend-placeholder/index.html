@@ -13,30 +13,47 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
   body { display: flex; flex-direction: column; }
-  header {
-    display: flex; align-items: center; justify-content: flex-start;
-    padding: 10px 18px; border-bottom: 1px solid #3c3c3c; background: #252526;
+  header, .screen-header {
+    display: flex; align-items: center; gap: 6px; justify-content: flex-start;
+    padding: 10px 18px; padding-top: max(10px, env(safe-area-inset-top));
+    border-bottom: 1px solid #3c3c3c; background: #252526;
     flex: 0 0 auto;
   }
-  header .icon-btn {
+  .screen-header h1 { font-size: 16px; margin: 0; }
+  .icon-btn {
     background: none; border: none; cursor: pointer; font-size: 16px;
     padding: 6px 8px; border-radius: 6px; color: #e5e5e5; line-height: 1;
   }
-  header .icon-btn:hover { background: #3c3c3c; }
+  .icon-btn:hover { background: #3c3c3c; }
   main { flex: 1 1 auto; min-height: 0; position: relative; }
   #frame { display: none; width: 100%; height: 100%; border: none; }
   #frame.show { display: block; }
+  #remoteError {
+    display: none; position: absolute; inset: 0; padding: 40px 24px;
+    align-items: center; justify-content: center; text-align: center;
+    background: #1e1e1e; color: #9a9a9a; font-size: 13px;
+  }
+  #remoteError.show { display: flex; }
+  #remoteError button {
+    display: block; margin: 16px auto 0; padding: 10px 18px; border: 0;
+    border-radius: 6px; background: #3f83f8; color: #fff; font-weight: 600;
+  }
   #empty { padding: 40px 24px; text-align: center; color: #9a9a9a; font-size: 13px; }
-  .modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
-    align-items: flex-start; justify-content: center; padding: 24px; overflow-y: auto; z-index: 100;
+  /* Màn hình toàn trang riêng (KHÔNG phải modal/overlay đè lên trang khác) — trước đây dùng
+     .modal-overlay (position:fixed;inset:0;background:rgba(...);align-items:flex-start;padding:24px)
+     khiến hộp thoại luôn dính sát mép trên (không hề có env(safe-area-inset-top)) bất kể header đã
+     fix gì, vì header là 1 element HOÀN TOÀN KHÁC bị modal che mất. .screen giờ tự có header/safe-area
+     riêng (dùng chung style header ở trên) + nội dung căn giữa dọc, đúng bố cục màn login code-server. */
+  .screen {
+    display: none; position: fixed; inset: 0; background: #1e1e1e; z-index: 100;
+    flex-direction: column;
   }
-  .modal-overlay.open { display: flex; }
-  .modal-box {
-    width: 100%; max-width: 480px; background: #1e1e1e; border: 1px solid #3c3c3c;
-    border-radius: 10px; padding: 24px;
+  .screen.show { display: flex; }
+  .screen-body {
+    flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center;
+    padding: 24px; overflow-y: auto;
   }
-  .modal-box h1 { font-size: 18px; margin: 0 0 4px; }
+  .card { width: 100%; max-width: 480px; }
   .sub { color: #9a9a9a; font-size: 13px; margin-bottom: 18px; }
   input[type="text"] {
     width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid #4b5563;
@@ -52,20 +69,27 @@
 </head>
 <body>
   <header>
+    <button type="button" id="btnReload" class="icon-btn" title="Tải lại">🔄</button>
     <button type="button" id="btnSettings" class="icon-btn" title="Đổi máy kết nối">⚙️</button>
   </header>
   <main>
     <div id="empty">Chưa kết nối máy nào — bấm ⚙️ để nhập URL Tailscale của máy đang chạy code-server.</div>
     <iframe id="frame"></iframe>
+    <div id="remoteError"><div><div id="remoteErrorText">Không thể tải trang từ máy desktop.</div><button type="button" id="btnRetry">Thử lại</button></div></div>
   </main>
 
-  <div class="modal-overlay" id="settingsModal">
-    <div class="modal-box">
+  <div class="screen" id="settingsScreen">
+    <div class="screen-header">
+      <button type="button" id="btnBack" class="icon-btn" title="Quay lại">←</button>
       <h1>Kết nối máy</h1>
-      <div class="sub">Nhập URL Tailscale (hoặc Funnel) của máy đang chạy telecode/code-server.</div>
-      <input type="text" id="urlInput" placeholder="https://may-cua-ban.tailxxxx.ts.net" autocapitalize="off" autocorrect="off" spellcheck="false">
-      <div class="hint">URL được lưu trên chính điện thoại này (localStorage), không gửi đi đâu khác.</div>
-      <button type="button" id="btnConnect">Kết nối</button>
+    </div>
+    <div class="screen-body">
+      <div class="card">
+        <div class="sub">Nhập URL Tailscale (hoặc Funnel) của máy đang chạy telecode/code-server.</div>
+        <input type="text" id="urlInput" placeholder="https://may-cua-ban.tailxxxx.ts.net" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div class="hint">URL được lưu trên chính điện thoại này (localStorage), không gửi đi đâu khác.</div>
+        <button type="button" id="btnConnect">Kết nối</button>
+      </div>
     </div>
   </div>
 
@@ -73,7 +97,10 @@
 const STORAGE_KEY = 'telecode_remote_url';
 const frame = document.getElementById('frame');
 const empty = document.getElementById('empty');
-const modal = document.getElementById('settingsModal');
+const remoteError = document.getElementById('remoteError');
+const remoteErrorText = document.getElementById('remoteErrorText');
+const screen = document.getElementById('settingsScreen');
+const btnBack = document.getElementById('btnBack');
 const urlInput = document.getElementById('urlInput');
 
 function normalizeUrl(v) {
@@ -87,31 +114,81 @@ function applyUrl(url) {
   if (!url) {
     frame.classList.remove('show');
     empty.style.display = 'block';
+    remoteError.classList.remove('show');
     return;
   }
+  // Luôn giữ code-server trong iframe. Android WebView đã được patch để nhận
+  // third-party cookie; điều hướng top-level ra Funnel làm Tauri mất trang vỏ
+  // và trên một số bản WebView báo lỗi "không thể tải trang web" mà không có
+  // cách retry trong app.
+  remoteError.classList.remove('show');
+  remoteErrorText.textContent = 'Đang kết nối tới máy desktop...';
   frame.src = url;
   frame.classList.add('show');
   empty.style.display = 'none';
 }
 
-function openSettings() { modal.classList.add('open'); }
-function closeSettings() { modal.classList.remove('open'); }
+let loadTimer;
+frame.addEventListener('load', () => {
+  clearTimeout(loadTimer);
+  remoteError.classList.remove('show');
+});
+
+function showRemoteError() {
+  remoteErrorText.textContent = 'Không thể tải trang từ máy desktop. Kiểm tra Tailscale/Funnel rồi thử lại.';
+  remoteError.classList.add('show');
+}
+
+function loadRemote(url) {
+  if (!url) return;
+  remoteError.classList.remove('show');
+  frame.src = 'about:blank';
+  setTimeout(() => {
+    applyUrl(url);
+    clearTimeout(loadTimer);
+    loadTimer = setTimeout(showRemoteError, 15000);
+  }, 50);
+}
+
+function openSettings() {
+  // Nút back chỉ có ý nghĩa khi ĐÃ có màn chính để quay về (từng kết nối trước đó) — lần mở đầu
+  // tiên (chưa từng kết nối) không có gì để quay lại, ẩn đi giống màn login không có nút back.
+  btnBack.style.display = localStorage.getItem(STORAGE_KEY) ? '' : 'none';
+  screen.classList.add('show');
+}
+function closeSettings() { screen.classList.remove('show'); }
+
+// Tải lại thủ công — WebView không có nút back/refresh riêng, và khi iframe load lỗi
+// (mất mạng/Funnel gián đoạn tạm thời) thì kẹt luôn màn lỗi native, không tự phục hồi.
+// Đặt về 'about:blank' trước rồi mới gán lại URL thật (thay vì gán lại y hệt src cũ) để
+// ép trình duyệt điều hướng lại thật sự, không bị coi là "cùng URL, không cần load lại".
+document.getElementById('btnReload').addEventListener('click', () => {
+  const url = localStorage.getItem(STORAGE_KEY) || '';
+  if (!url) return;
+  loadRemote(url);
+});
+document.getElementById('btnRetry').addEventListener('click', () => {
+  loadRemote(localStorage.getItem(STORAGE_KEY) || '');
+});
 
 document.getElementById('btnSettings').addEventListener('click', openSettings);
-modal.addEventListener('click', (e) => { if (e.target === modal) closeSettings(); });
+btnBack.addEventListener('click', () => {
+  if (!localStorage.getItem(STORAGE_KEY)) return;
+  closeSettings();
+});
 
 document.getElementById('btnConnect').addEventListener('click', () => {
   const url = normalizeUrl(urlInput.value);
   if (!url) return;
   localStorage.setItem(STORAGE_KEY, url);
-  applyUrl(url);
+  loadRemote(url);
   closeSettings();
 });
 
 const saved = localStorage.getItem(STORAGE_KEY) || '';
 urlInput.value = saved;
 if (saved) {
-  applyUrl(saved);
+  loadRemote(saved);
 } else {
   openSettings();
 }

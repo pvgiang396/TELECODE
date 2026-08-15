@@ -33,21 +33,18 @@ function ensureVenv() {
   run(venvPython, ['-m', 'pip', 'install', '-q', '-r', path.join(SIDECAR_DIR, 'requirements.txt')]);
 }
 
-// bot.py/wizard.py/lib_status.py không được `import` tĩnh trong dispatcher.py (lý do:
-// xem docstring dispatcher.py) — PyInstaller vì vậy không tự dò ra dependency của
+// wizard.py/lib_status.py không được `import` tĩnh trong dispatcher.py (lý do: xem
+// docstring dispatcher.py) — PyInstaller vì vậy không tự dò ra dependency của
 // chúng, phải khai báo tay đúng những gì các file .py THẬT đó import ở đầu file.
 const HIDDEN_IMPORTS = [
   'yaml',
   'dotenv',
   'aiohttp',
-  'telegram',
-  'telegram.ext',
-  'telegram.constants',
   // Submodule "chấm" của stdlib (http.server, urllib.parse...) — PyInstaller chỉ tự dò được qua
-  // static analysis của statement `import`, nhưng dispatcher.py không `import` tĩnh bot.py/
-  // wizard.py/lib_status.py (chạy qua runpy — xem dispatcher.py) nên các submodule này bị bỏ sót
-  // dù bản thân chúng thuộc stdlib. Bug thật đã gặp + fix: thiếu 'http.server' khiến wizard.py crash
-  // ngay dòng import đầu tiên lúc chạy trong binary đã đóng gói (chạy trực tiếp bằng `python3
+  // static analysis của statement `import`, nhưng dispatcher.py không `import` tĩnh wizard.py/
+  // lib_status.py (chạy qua runpy — xem dispatcher.py) nên các submodule này bị bỏ sót dù bản
+  // thân chúng thuộc stdlib. Bug thật đã gặp + fix: thiếu 'http.server' khiến wizard.py crash ngay
+  // dòng import đầu tiên lúc chạy trong binary đã đóng gói (chạy trực tiếp bằng `python3
   // wizard.py` không lộ ra vì đó không đi qua PyInstaller).
   'http.server',
   'urllib.parse',

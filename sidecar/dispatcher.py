@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """Entrypoint đóng gói bởi PyInstaller thành 1 binary (`telecode-sidecar`).
 
-QUAN TRỌNG: file này KHÔNG import bot.py/wizard.py bằng `import` tĩnh — nếu làm
-vậy, PyInstaller sẽ đóng băng (freeze) 2 module đó vào bundle, khiến biến
-module-level `Path(__file__).parent` bên trong bot.py/wizard.py (dùng để tìm
-config.yaml/.env/state.json) trỏ vào thư mục tạm giải nén của PyInstaller
-(`sys._MEIPASS`) thay vì thư mục cài đặt thật — tương đương bug `__dirname`
-mà k8sql từng gặp khi đóng gói k8sctl bằng Node SEA.
+QUAN TRỌNG: file này KHÔNG import wizard.py bằng `import` tĩnh — nếu làm vậy,
+PyInstaller sẽ đóng băng (freeze) module đó vào bundle, khiến biến module-level
+`Path(__file__).parent` bên trong wizard.py (dùng để tìm config.yaml/.env/
+state.json) trỏ vào thư mục tạm giải nén của PyInstaller (`sys._MEIPASS`) thay vì
+thư mục cài đặt thật — tương đương bug `__dirname` mà k8sql từng gặp khi đóng gói
+k8sctl bằng Node SEA.
 
-Thay vào đó: bot.py/wizard.py/scripts/*.py vẫn là các file .py THẬT nằm trên đĩa
-(deploy kèm theo, không đóng gói vào binary) — dispatcher dùng `runpy.run_path()`
-để chạy đúng file thật đó, giữ `__file__` trỏ đúng vị trí thật. Binary PyInstaller
-chỉ đóng vai trò "mang theo sẵn 1 Python interpreter + toàn bộ pip dependency"
-(pyyaml/python-telegram-bot/python-dotenv...) — không cần cài venv tay nữa.
+Thay vào đó: wizard.py/scripts/*.py vẫn là các file .py THẬT nằm trên đĩa (deploy
+kèm theo, không đóng gói vào binary) — dispatcher dùng `runpy.run_path()` để chạy
+đúng file thật đó, giữ `__file__` trỏ đúng vị trí thật. Binary PyInstaller chỉ
+đóng vai trò "mang theo sẵn 1 Python interpreter + toàn bộ pip dependency"
+(pyyaml/python-dotenv/aiohttp...) — không cần cài venv tay nữa.
 
-Vì bot.py/wizard.py không được `import` tĩnh, PyInstaller không tự dò ra
-dependency của chúng — khai báo thủ công qua --hidden-import trong
-scripts/build-pyinstaller.mjs (không sửa ở đây).
+Vì wizard.py không được `import` tĩnh, PyInstaller không tự dò ra dependency của
+nó — khai báo thủ công qua --hidden-import trong scripts/build-pyinstaller.mjs
+(không sửa ở đây).
 
 Usage:
-    telecode-sidecar bot <path-to-bot.py>
     telecode-sidecar wizard-server <path-to-wizard.py> <RUN_DIR> <DIR> [caller_pid]
     telecode-sidecar status <path-to-scripts-dir-chứa-lib_status.py>
     telecode-sidecar reconnect <path-to-reconnect.sh>
@@ -40,13 +39,6 @@ def _run_script(script_path: str, argv_rest: list[str]) -> None:
         sys.exit(1)
     sys.argv = [str(path), *argv_rest]
     runpy.run_path(str(path), run_name="__main__")
-
-
-def cmd_bot(args: list[str]) -> None:
-    if not args:
-        print("Usage: telecode-sidecar bot <path-to-bot.py>", file=sys.stderr)
-        sys.exit(1)
-    _run_script(args[0], [])
 
 
 def cmd_wizard_server(args: list[str]) -> None:
@@ -90,7 +82,6 @@ def cmd_reconnect(args: list[str]) -> None:
 
 
 COMMANDS = {
-    "bot": cmd_bot,
     "wizard-server": cmd_wizard_server,
     "status": cmd_status,
     "reconnect": cmd_reconnect,

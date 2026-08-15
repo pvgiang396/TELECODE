@@ -67,6 +67,6 @@ $Shortcut.Save()
 Write-Host "Đã tạo shortcut Desktop: $shortcutPath" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "Xong. Bot Telegram và code-server đang chạy bên trong WSL." -ForegroundColor Green
-Write-Host "Lưu ý: mỗi lần khởi động lại Windows, WSL không tự chạy nền các tiến trình này —" -ForegroundColor Yellow
-Write-Host "mở lại 'Ubuntu' từ Start Menu và chạy lại đúng lệnh cài ở trên (idempotent, không hỏi lại token đã lưu)." -ForegroundColor Yellow
+Write-Host "Xong. code-server đang chạy bên trong WSL." -ForegroundColor Green
+Write-Host "Lưu ý: mỗi lần khởi động lại Windows, WSL không tự chạy nền tiến trình này —" -ForegroundColor Yellow
+Write-Host "mở lại 'Ubuntu' từ Start Menu và chạy lại đúng lệnh cài ở trên (idempotent, không hỏi lại cấu hình đã lưu)." -ForegroundColor Yellow

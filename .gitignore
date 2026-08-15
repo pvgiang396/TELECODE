@@ -67,8 +67,6 @@ tunnel.log
 .run/
 venv/
 
-# Owner pairing state (chat_id) — quản lý bởi bot.py, không phải config tĩnh
-state.json
 
 # Workspace & Data
 workspace/

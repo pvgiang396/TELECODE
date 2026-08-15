@@ -5,23 +5,15 @@ Khởi chạy project này trong 5 phút.
 ## Yêu cầu tối thiểu
 
 - Python 3.8+
-- Telegram account
 - Máy tính có thể truy cập internet
 
 ## 1️⃣ Clone/Download Project
 
 ```bash
-cd telegram-vscode-mini-app
+cd telecode
 ```
 
-## 2️⃣ Tạo Bot Telegram
-
-1. Mở Telegram, tìm **@BotFather**
-2. Gửi `/newbot`
-3. Đặt tên và username cho bot
-4. Sao chép token (ví dụ: `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`)
-
-## 3️⃣ Setup Project
+## 2️⃣ Setup Project
 
 ```bash
 # Tạo virtual environment
@@ -34,18 +26,16 @@ pip install -r requirements.txt
 
 # Copy config
 cp config.example.yaml config.yaml
-nano config.yaml  # Chỉnh sửa với token
+nano config.yaml  # Chỉnh sửa nếu cần
 ```
 
 **Chỉnh sửa config.yaml:**
 ```yaml
-TELEGRAM_BOT_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"  # Token từ BotFather
 OPENAI_API_KEY: ""  # Tuỳ chọn — API key 9Router/OpenAI (thường sk-..., KHÔNG dùng token AQ...), để trống nếu chưa dùng
 VSCODE_PUBLIC_URL: "http://localhost:8443"  # Tạm thời (sẽ update sau)
-MINI_APP_URL: "http://localhost:8000/mini_app.html"  # Development
 ```
 
-> Lưu ý: cách setup thủ công từng bước ở file này (cloudflared, chạy `bot.py` tay...) đã cũ — cách khuyến nghị hiện tại là chạy thẳng `bash setup.sh` (xem README.md), script sẽ tự hỏi/cài mọi thứ kể cả bước Codex CLI này.
+> Lưu ý: cách setup thủ công từng bước ở file này đã cũ — cách khuyến nghị hiện tại là chạy thẳng `bash setup.sh` (xem README.md), script sẽ tự hỏi/cài mọi thứ kể cả bước Codex CLI này.
 
 ## 4️⃣ Cài đặt Code-Server
 
@@ -101,70 +91,16 @@ https://random-name-123.trycloudflare.com
 VSCODE_PUBLIC_URL: "https://random-name-123.trycloudflare.com"
 ```
 
-## 6️⃣ Host Mini App
+## 6️⃣ Truy cập từ điện thoại (app Telecode)
 
-Mở terminal mới:
-
-```bash
-# Ở folder project
-python -m http.server 8000
-```
-
-## 7️⃣ Chạy Bot
-
-```bash
-# Terminal khác
-python bot.py
-```
-
-Bạn sẽ thấy:
-```
-✅ Bot started successfully!
-🔗 VS Code URL: https://random-name-123.trycloudflare.com
-📱 Send /start to your bot on Telegram
-```
-
-## 8️⃣ Test trên Telegram
-
-1. Mở Telegram
-2. Tìm bot của bạn (theo username)
-3. Gửi `/start`
-4. Click nút "🔧 Open VS Code"
-5. 🎉 VS Code sẽ mở trong Telegram!
-
----
-
-## 🐳 Cách Dễ Hơn: Docker
-
-Nếu bạn có Docker:
-
-```bash
-# Copy .env
-cp .env.example .env
-nano .env  # Chỉnh sửa token
-
-# Chạy
-docker-compose up -d
-
-# Xem logs
-docker-compose logs -f
-
-# Lấy tunnel URL
-docker-compose logs tunnel | grep trycloudflare
-```
+1. Cài app Telecode trên điện thoại (Android `.apk`) hoặc mở app desktop Tauri trên máy tính khác.
+2. Bấm icon ⚙️ (bánh răng) ở góc trên.
+3. Dán URL tunnel (vd Tailscale Funnel) hiển thị ở bước cấu hình.
+4. 🎉 VS Code sẽ mở ngay trong app!
 
 ---
 
 ## 🐛 Troubleshooting
-
-### Bot không phản hồi
-```bash
-# Kiểm tra token
-grep TELEGRAM_BOT_TOKEN config.yaml
-
-# Bot chạy?
-ps aux | grep bot.py
-```
 
 ### Không thể kết nối VS Code
 ```bash
@@ -172,13 +108,8 @@ ps aux | grep bot.py
 curl http://localhost:8443
 
 # Tunnel chạy?
-# (Terminal cloudflared phải còn chạy)
+# (Terminal tunnel phải còn chạy)
 ```
-
-### Telegram Mini App bị block
-- Đảm bảo MINI_APP_URL có thể truy cập
-- Kiểm tra CORS headers
-- Thử dùng Cloudflare Tunnel cho cả mini_app.html
 
 ---
 
@@ -186,16 +117,14 @@ curl http://localhost:8443
 
 - ✅ Đọc **README.md** để tìm hiểu kỹ hơn
 - ✅ Xem **CLAUDE.md** để AI có thể giúp
-- ✅ Tùy chỉnh **mini_app.html** (theme, buttons, etc)
-- ✅ Deploy production (Docker)
+- ✅ Build app Telecode desktop/Android (xem CLAUDE.md)
 
 ---
 
 ## 💡 Tips
 
-- **Port conflicts**: Thay đổi port trong `config.yaml` và `mini_app.html`
+- **Port conflicts**: Thay đổi port trong `config.yaml`
 - **Security**: Bật password cho code-server
-- **Mobile optimization**: Mini app tự động responsive
 - **Offline mode**: Tunnel giúp bạn truy cập từ bất kỳ đâu
 
 ---

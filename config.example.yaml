@@ -1,9 +1,5 @@
-# Telegram VS Code Mini App - Configuration
+# Telecode - Configuration
 # Copy this file to config.yaml and update values
-
-# Telegram Bot Token
-# Get from @BotFather on Telegram
-TELEGRAM_BOT_TOKEN: "YOUR_BOT_TOKEN_HERE"
 
 # OPENAI_API_KEY dùng cho Codex CLI extension (openai.chatgpt) qua 9Router (Gemini)
 # — dùng API key router/OpenAI (thường `sk-...`), KHÔNG dùng token Codex `AQ...`.
@@ -17,38 +13,13 @@ OPENAI_API_KEY: "YOUR_OPENAI_API_KEY_HERE"
 # quyền "Copilot Requests". Để trống nếu chưa dùng, setup.sh sẽ bỏ qua bước này.
 GITHUB_COPILOT_PAT: "YOUR_GITHUB_COPILOT_PAT_HERE"
 
-# FILE_INBOX_DIR: thư mục nhận ảnh/file gửi qua Telegram — gửi ảnh hoặc file bất
-# kỳ thẳng cho bot (chat riêng, chỉ chủ sở hữu) sẽ tự tải và lưu vào đây, để đồng
-# bộ file từ điện thoại về máy tính khi làm việc từ xa. Mặc định là thư mục con
-# "files" trong thư mục cài telecode, hỏi lại (đổi được) ở bước 6d khi chạy setup.sh.
-FILE_INBOX_DIR: "/path/to/telecode/files"
-
 # VS Code Server Configuration
 VSCODE_PORT: 8443
 VSCODE_PASSWORD: "your-secure-password"
 
-# Public URL for VS Code Server
-# This is the URL that Telegram users will access
-# Get this from Cloudflare Tunnel or Ngrok after running it
-VSCODE_PUBLIC_URL: "https://your-tunnel-name.trycloudflare.com"
-
-# Mã claim quyền chủ sở hữu 1 lần — sinh tự động bởi setup.sh (giữ nguyên qua các
-# lần chạy lại tới khi đã claim). Người dùng đầu tiên gửi "/start <mã này>" cho bot
-# sẽ được ghi nhận vào state.json (owner_chat_id) làm chủ sở hữu duy nhất; mọi
-# lệnh khác (bao gồm /start sau đó) chỉ trả lời đúng chat_id này. Chống race
-# condition "ai /start trước làm chủ" nếu bot username/token vô tình lộ ra trước
-# khi chủ thật kịp bấm /start lần đầu.
-OWNER_CLAIM_CODE: "generated-by-setup-sh"
-
-# Mini App Configuration
-# Where the mini_app.html is hosted
-# For testing locally: http://localhost:8000/mini_app.html
-# For production: https://your-domain.com/mini_app.html
-MINI_APP_URL: "https://your-domain.com/mini_app.html"
-
-# Bot Configuration
-BOT_POLLING_INTERVAL: 30  # Seconds between polling updates
-BOT_TIMEOUT: 30           # Request timeout in seconds
+# Public URL for VS Code Server — Tailscale Funnel (https://<máy>.<tailnet>.ts.net),
+# tự lấy được bởi setup.sh ở bước cấu hình Funnel, không cần tự điền tay ở đây.
+VSCODE_PUBLIC_URL: "https://your-machine.your-tailnet.ts.net"
 
 # VS Code Server Settings
 VSCODE_AUTH_REQUIRED: true
@@ -62,9 +33,6 @@ ENABLE_DEBUG_MODE: false
 ALLOW_MULTIPLE_CONNECTIONS: false
 
 # Notes:
-# 1. Generate BOT_TOKEN at https://t.me/BotFather
-# 2. Get VSCODE_PUBLIC_URL from Cloudflare Tunnel:
-#    ./cloudflared tunnel --url http://localhost:8443
-# 3. For production, use a real domain and HTTPS only
-# 4. Keep VSCODE_PASSWORD strong (min 12 characters)
-# 5. Keep BOT_TOKEN secret - never commit it to git
+# 1. VSCODE_PUBLIC_URL tự lấy từ `tailscale status` khi chạy setup.sh (bước Tailscale
+#    Funnel) — cần cài + đăng nhập Tailscale trước.
+# 2. Keep VSCODE_PASSWORD strong (min 12 characters).

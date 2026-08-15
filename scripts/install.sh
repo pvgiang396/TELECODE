@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Cài đặt nhanh telecode: clone repo rồi chạy setup.sh (cài code-server, cloudflared,
-# mở 2 tunnel, hỏi Telegram Bot Token, khởi động bot) — xem telecode/CLAUDE.md để hiểu
-# kiến trúc, hoặc README.md để biết chi tiết từng bước setup.sh làm.
+# Cài đặt nhanh telecode: clone repo rồi chạy setup.sh (cài code-server, Tailscale,
+# cấu hình Funnel, đăng nhập AI CLI) — xem telecode/CLAUDE.md để hiểu kiến trúc, hoặc
+# README.md để biết chi tiết từng bước setup.sh làm.
 #
 # Chạy:
 #   curl -fsSL https://gitlab.com/pvgiang396/telecode/-/raw/main/scripts/install.sh | bash

@@ -25,9 +25,16 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
-from lib_status import get_status  # noqa: E402
+from lib_status import get_status, overall_ok  # noqa: E402
+from cleanup_codex_writers import cleanup_codex_writer_locks  # noqa: E402
 
 PORT = 8899
+
+
+def cleanup_startup_state() -> None:
+    """Clear only Codex lock files that no live process currently holds."""
+    for lock_name in cleanup_codex_writer_locks():
+        print(f"[telecode] removed abandoned Codex writer lock: {lock_name}", flush=True)
 
 
 def _cmdctl_exec(command: str, sudo: bool = False, timeout_ms: int = 120000) -> dict:
@@ -160,6 +167,14 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
                 self.wfile.write(body)
             elif self.path == "/api/status":
                 self._send_json(200, probe_status(run_dir, dir_))
+            elif self.path == "/api/tray-status":
+                # Route riêng cho main.rs (Tauri) poll đổi icon tray xanh/đỏ — TÁCH
+                # khỏi /api/status vì cần check_public=True (curl thật tới Funnel
+                # public URL, xem overall_ok() trong lib_status.py) trong khi
+                # /api/status ở trên cố tình check_public=False để UI wizard poll
+                # nhanh/liên tục không bị chậm bởi round-trip mạng ngoài.
+                status = get_status(run_dir, check_public=True, project_dir=dir_)
+                self._send_json(200, {"overallOk": overall_ok(status)})
             elif self.path == "/icon.png" and icon_bytes:
                 # Favicon riêng của wizard — không có link này thì Chrome dùng icon
                 # mặc định của nó cho cửa sổ --app=, kể cả taskbar/alt-tab (đã xác
@@ -289,6 +304,7 @@ def open_browser_plain(url: str):
 
 
 def main():
+    cleanup_startup_state()
     if len(sys.argv) < 3:
         print("Usage: wizard.py <RUN_DIR> <DIR> [caller_pid]", file=sys.stderr)
         sys.exit(1)
