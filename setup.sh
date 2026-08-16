@@ -1011,7 +1011,10 @@ if [ -n "$OPENAI_API_KEY" ] && [[ "$OPENAI_API_KEY" == AQ.* ]]; then
     error "      Liên hệ team để lấy key 9Router, hoặc bỏ qua (để trống) lần này."
     exit 1
 fi
-if [ -n "$OPENAI_API_KEY" ]; then
+# Nếu OPENAI_API_KEY rỗng nhưng auth.json đã tồn tại, giữ nguyên (không ghi đè thành rỗng)
+if [ -z "$OPENAI_API_KEY" ] && [ -f "$HOME/.codex/auth.json" ]; then
+    info "   Giữ nguyên ~/.codex/auth.json hiện tại (không ghi đè)."
+elif [ -n "$OPENAI_API_KEY" ]; then
     echo "$INSTALLED_EXT" | grep -q '^openai\.chatgpt$' || {
         info "   Đang cài extension Codex (openai.chatgpt)..."
         if code-server --install-extension openai.chatgpt --force; then
@@ -1033,6 +1036,7 @@ env_key = "OPENAI_API_KEY"
 
 [agents.subagent]
 model = "9router"
+description = "Internal subagent for telecode"
 EOF
     cat > "$HOME/.codex/auth.json" <<EOF
 {

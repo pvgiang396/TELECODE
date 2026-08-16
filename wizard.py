@@ -27,6 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
 from lib_status import get_status, overall_ok  # noqa: E402
 from cleanup_codex_writers import cleanup_codex_writer_locks  # noqa: E402
+from lib_env import prepare_env_for_codex  # noqa: E402
 
 PORT = 8899
 
@@ -236,7 +237,9 @@ def make_handler(run_dir: Path, dir_: Path, caller_pid: str = ""):
                 # tiến trình cài đặt/link VS Code sau khi xong.
                 log_dir = dir_ / "logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
-                env = dict(os.environ, TELECODE_APPLYING="1", TELECODE_RUN_DIR=str(run_dir))
+                env = prepare_env_for_codex()
+                env["TELECODE_APPLYING"] = "1"
+                env["TELECODE_RUN_DIR"] = str(run_dir)
                 with open(log_dir / "setup-apply.log", "ab") as log_f:
                     subprocess.Popen(
                         ["bash", str(dir_ / "setup.sh")],
