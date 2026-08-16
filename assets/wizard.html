@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Telecode</title>
 <link rel="icon" href="/icon.png" />
 <style>
@@ -16,7 +16,7 @@
   body { display: flex; flex-direction: column; }
   header {
     display: flex; align-items: center; justify-content: flex-start;
-    padding: 10px 18px; border-bottom: 1px solid #3c3c3c; background: #252526;
+    padding: max(12px, env(safe-area-inset-top)) 18px 10px; border-bottom: 1px solid #3c3c3c; background: #252526;
     flex: 0 0 auto;
   }
   header .header-actions { display: flex; align-items: center; gap: 4px; }
