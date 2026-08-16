@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, globSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -69,7 +69,25 @@ function configureReleaseSigning() {
   writeFileSync(appGradle, patched);
 }
 
-run("npx", ["tauri", "android", "init"], tauriRoot);
+// Init Android project — retry if RustWebView.kt not generated
+let retries = 0;
+const maxRetries = 3;
+while (retries < maxRetries) {
+  run("npx", ["tauri", "android", "init"], tauriRoot);
+  const pattern = path.join(tauriRoot, "gen/android/app/src/main/java/**/generated/RustWebView.kt");
+  const matches = globSync(pattern);
+  if (matches.length > 0) break;
+  retries++;
+  if (retries < maxRetries) {
+    console.warn(`[build-android] RustWebView.kt not found, retrying (${retries}/${maxRetries})...`);
+    // Clean up partial Android project
+    rmSync(path.join(tauriRoot, "gen/android"), { recursive: true, force: true });
+  }
+}
+if (retries === maxRetries) {
+  throw new Error(`Failed to generate RustWebView.kt after ${maxRetries} retries`);
+}
+
 run("node", ["scripts/patch-android-webview.mjs"], projectRoot);
 run("npx", ["tauri", "icon", "assets/icon.png"], projectRoot);
 
