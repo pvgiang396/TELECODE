@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const pattern = join(
   projectRoot,
-  "src-tauri/gen/android/app/src/main/java/**/generated/RustWebView.kt",
+  "src-tauri/gen/android/app/src/main/java/com/pvgiang396/telecode/generated/RustWebView.kt",
 );
 
 const matches = globSync(pattern);
@@ -42,8 +42,10 @@ for (const file of matches) {
   }
   if (!content.includes(INSERT_AFTER)) {
     console.error(
-      `[patch-android-webview] Không tìm thấy điểm chèn trong ${file} (template wry có thể đã đổi) — patch tay lại.`,
+      `[patch-android-webview] Không tìm thấy điểm chèn trong ${file} (template wry có thể đã đổi) — hãy patch tay:`,
     );
+    console.error(`  Tìm dòng: settings.javaScriptCanOpenWindowsAutomatically = true`);
+    console.error(`  Thêm sau: CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)`);
     process.exit(1);
   }
   const patched = content.replace(
