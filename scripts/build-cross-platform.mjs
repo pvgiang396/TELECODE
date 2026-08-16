@@ -11,6 +11,8 @@
 import { buildNative } from "./lib/build-native.mjs";
 import { buildWindowsRustViaDocker } from "./lib/build-windows-cross.mjs";
 import { dispatchGithubBuild } from "./lib/github-actions.mjs";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -119,9 +121,26 @@ async function main() {
       continue;
     }
 
-    if (target === "android" || target === "ios") {
-      console.log(`\n[build] ── Dispatch GitHub Actions ${target} ──`);
-      results[target] = dispatchGithubBuild({ projectRoot: REPO_ROOT, targets: [target] });
+    if (target === "android") {
+      console.log(`\n[build] ── Native build cho Android (local) ──`);
+      try {
+        execFileSync("npm", ["run", "build:android"], { cwd: REPO_ROOT, stdio: "inherit" });
+        // Tìm APK files vừa build
+        const distAndroidDir = path.join(REPO_ROOT, "dist", "android");
+        const apkFiles = fs.readdirSync(distAndroidDir)
+          .filter(f => f.endsWith(".apk"))
+          .map(f => path.join(distAndroidDir, f));
+        results.android = { distDir: distAndroidDir, files: apkFiles };
+      } catch (err) {
+        console.error(`[build] ✗ Build Android LỖI: ${err.message}`);
+        results.android = { error: err.message };
+      }
+      continue;
+    }
+
+    if (target === "ios") {
+      console.log("\n[build] ── Dispatch GitHub Actions iOS ──");
+      results.ios = dispatchGithubBuild({ projectRoot: REPO_ROOT, targets: ["ios"] });
       continue;
     }
 
