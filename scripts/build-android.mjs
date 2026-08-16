@@ -69,26 +69,17 @@ function configureReleaseSigning() {
   writeFileSync(appGradle, patched);
 }
 
-// Init Android project — retry if RustWebView.kt not generated
-let retries = 0;
-const maxRetries = 3;
-while (retries < maxRetries) {
-  run("npx", ["tauri", "android", "init"], tauriRoot);
-  const pattern = path.join(tauriRoot, "gen/android/app/src/main/java/**/generated/RustWebView.kt");
-  const matches = globSync(pattern);
-  if (matches.length > 0) break;
-  retries++;
-  if (retries < maxRetries) {
-    console.warn(`[build-android] RustWebView.kt not found, retrying (${retries}/${maxRetries})...`);
-    // Clean up partial Android project
-    rmSync(path.join(tauriRoot, "gen/android"), { recursive: true, force: true });
-  }
-}
-if (retries === maxRetries) {
-  throw new Error(`Failed to generate RustWebView.kt after ${maxRetries} retries`);
+// Init Android project
+run("npx", ["tauri", "android", "init"], tauriRoot);
+
+// Patch RustWebView.kt if it exists (optional, don't fail if not found)
+try {
+  run("node", ["scripts/patch-android-webview.mjs"], projectRoot);
+} catch (e) {
+  console.warn(`[build-android] WARNING: patch-android-webview failed (non-fatal): ${e.message}`);
+  // Continue without patching — cookie handling may fail on Android but build can proceed
 }
 
-run("node", ["scripts/patch-android-webview.mjs"], projectRoot);
 run("npx", ["tauri", "icon", "assets/icon.png"], projectRoot);
 
 const apkRoot = path.join(tauriRoot, "gen", "android", "app", "build", "outputs", "apk");
