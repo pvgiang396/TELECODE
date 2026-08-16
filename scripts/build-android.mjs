@@ -80,6 +80,13 @@ try {
   // Continue without patching — cookie handling may fail on Android but build can proceed
 }
 
+// Patch icon background to transparent
+try {
+  run("node", ["scripts/patch-android-icon-background.mjs"], projectRoot);
+} catch (e) {
+  console.warn(`[build-android] WARNING: patch-android-icon-background failed (non-fatal): ${e.message}`);
+}
+
 run("npx", ["tauri", "icon", "assets/icon.png"], projectRoot);
 
 const apkRoot = path.join(tauriRoot, "gen", "android", "app", "build", "outputs", "apk");
