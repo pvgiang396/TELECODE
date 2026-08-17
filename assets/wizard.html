@@ -89,6 +89,23 @@
   }
   .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
   .modal-header h1 { flex: 1; }
+  .error-modal .modal-box {
+    max-width: 480px; padding: 20px;
+  }
+  .error-modal .modal-header h1 { font-size: 16px; color: #f87171; }
+  .error-modal .error-text {
+    background: #1a1a1a; border-left: 3px solid #f87171; padding: 12px;
+    border-radius: 4px; margin: 12px 0; font-size: 13px; color: #d4d4d4;
+    max-height: 150px; overflow-y: auto; word-break: break-word;
+  }
+  .error-modal .button-group {
+    display: flex; gap: 8px; margin-top: 16px;
+  }
+  .error-modal button {
+    flex: 1; padding: 10px 12px; border: none; border-radius: 6px;
+    background: #3f83f8; color: #fff; font-size: 14px; cursor: pointer; font-weight: 500;
+  }
+  .error-modal button:last-child { background: #3c3c3c; color: #e5e5e5; }
 </style>
 </head>
 <body>
@@ -117,11 +134,66 @@
     </div>
   </div>
 
+  <div class="modal-overlay error-modal" id="errorModal">
+    <div class="modal-box card">
+      <div class="modal-header">
+        <h1>❌ Đã xảy ra lỗi trong quá trình đăng nhập</h1>
+        <button type="button" id="closeError" class="icon-btn" title="Đóng">✕</button>
+      </div>
+      <div class="error-text" id="errorText"></div>
+      <div class="button-group">
+        <button type="button" id="btnCopyError">📋 Sao chép lỗi chi tiết</button>
+        <button type="button" id="btnCloseError">Đóng</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 const form = document.getElementById('form');
 const loading = document.getElementById('loading');
 const msg = document.getElementById('msg');
 const settingsModal = document.getElementById('settingsModal');
+const errorModal = document.getElementById('errorModal');
+const errorText = document.getElementById('errorText');
+
+// Error handling: bắt tất cả lỗi từ iframe (code-server) và hiển thị modal
+let lastError = null;
+window.addEventListener('error', (e) => {
+  lastError = `${e.message}\n\nFile: ${e.filename}\nLine: ${e.lineno}:${e.colno}`;
+  console.error('[Telecode Error]', lastError);
+  showErrorModal(lastError);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  lastError = `Promise rejection: ${e.reason || 'unknown error'}`;
+  console.error('[Telecode Error]', lastError);
+  showErrorModal(lastError);
+});
+
+function showErrorModal(error) {
+  errorText.textContent = error || 'Lỗi chưa xác định';
+  errorModal.classList.add('open');
+}
+
+document.getElementById('closeError').addEventListener('click', () => {
+  errorModal.classList.remove('open');
+});
+
+document.getElementById('btnCloseError').addEventListener('click', () => {
+  errorModal.classList.remove('open');
+});
+
+document.getElementById('btnCopyError').addEventListener('click', () => {
+  if (!lastError) return;
+  navigator.clipboard.writeText(lastError).then(() => {
+    const btn = document.getElementById('btnCopyError');
+    btn.textContent = '✅ Đã sao chép';
+    setTimeout(() => { btn.textContent = '📋 Sao chép lỗi chi tiết'; }, 1500);
+  }).catch(() => {
+    alert('❌ Không sao chép được: ' + lastError);
+  });
+});
+
 // Cửa sổ Tauri thật (main.rs mở với ?tauri=1) KHÔNG được tự window.close() — webview bị blank
 // trắng vì unload nội dung trước khi Rust kịp prevent_close()/hide() (bug thật đã gặp). Ngược lại,
 // chạy độc lập qua CLI (wizard.py tự mở Chrome --app=) thì window.close() vẫn hoạt động đúng như cũ.
